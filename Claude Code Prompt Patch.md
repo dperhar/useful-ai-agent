@@ -336,7 +336,7 @@ Anthropic в Feb-Mar 2026 внесли два параллельных изме�
 
 Env var `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` отключает adaptive и возвращает фиксированный бюджет, управляемый `MAX_THINKING_TOKENS`. В сочетании с `"effortLevel": "max"` в settings.json даёт максимально глубокий фиксированный бюджет на каждый ход.
 
-### Применение у Дениса
+### Example application
 
 Добавлено в `~/.claude/settings.json`:
 
