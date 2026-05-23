@@ -1,19 +1,175 @@
 #!/usr/bin/env python3
-"""Minimal read-only Transcripted MCP placeholder.
+"""Read-only MCP server for local Transcripted markdown captures."""
 
-Production installer wires this to the official Transcripted MCP binary when
-available. This fallback exists so agents can still read local Transcripted
-markdown captures without write access.
-"""
+from __future__ import annotations
 
+import json
 import os
+import re
+import sys
 from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(os.environ.get("TRANSCRIPTED_CAPTURES_DIR", Path.home() / "Library/Application Support/Transcripted/captures"))
+MEETINGS = ROOT / "meetings"
+DICTATIONS = ROOT / "dictations"
+
+
+def md_files(folder: Path) -> list[Path]:
+    if not folder.exists():
+        return []
+    return sorted(folder.rglob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def safe_file(folder: Path, name: str) -> Path:
+    candidate = (folder / name).resolve()
+    root = folder.resolve()
+    if root not in [candidate, *candidate.parents]:
+        raise ValueError("path escapes Transcripted capture folder")
+    if not candidate.exists() or candidate.suffix.lower() != ".md":
+        raise FileNotFoundError(name)
+    return candidate
+
+
+def read_text(path: Path, limit: int = 16000) -> str:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return text if len(text) <= limit else text[:limit] + "\n\n[truncated]"
+
+
+def snippet(text: str, query: str, width: int = 420) -> str:
+    idx = text.lower().find(query.lower())
+    if idx < 0:
+        return text[:width]
+    start = max(0, idx - width // 2)
+    end = min(len(text), idx + width // 2)
+    return text[start:end].strip()
+
+
+def result_text(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        value = json.dumps(value, ensure_ascii=False, indent=2)
+    return {"content": [{"type": "text", "text": value}]}
+
+
+def list_items(kind: str, limit: int = 20) -> list[dict[str, Any]]:
+    folder = MEETINGS if kind == "meeting" else DICTATIONS
+    items = []
+    for path in md_files(folder)[:limit]:
+        items.append({
+            "filename": path.name,
+            "relative_path": str(path.relative_to(folder)),
+            "modified": int(path.stat().st_mtime),
+            "bytes": path.stat().st_size,
+        })
+    return items
+
+
+def search_all(query: str, limit: int = 10, kinds: list[str] | None = None) -> list[dict[str, str]]:
+    kinds = kinds or ["meeting", "dictation"]
+    out: list[dict[str, str]] = []
+    for kind in kinds:
+        folder = MEETINGS if kind == "meeting" else DICTATIONS
+        for path in md_files(folder):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if query.lower() in text.lower() or query.lower() in path.name.lower():
+                out.append({
+                    "kind": kind,
+                    "filename": path.name,
+                    "relative_path": str(path.relative_to(folder)),
+                    "snippet": snippet(text, query),
+                })
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+TOOLS = [
+    ("recent_context", "Return recent Transcripted meetings and dictations."),
+    ("search_context", "Search meetings and dictations by text."),
+    ("list_meetings", "List local Transcripted meeting markdown files."),
+    ("read_meeting", "Read one meeting markdown file by filename or relative_path."),
+    ("list_dictations", "List local Transcripted dictation markdown files."),
+    ("read_dictation", "Read one dictation markdown file by filename or relative_path."),
+    ("search", "Alias for search_context."),
+    ("who_is", "Find mentions of a person across meetings and dictations."),
+    ("recap", "Return extractive recap from the newest or named capture."),
+]
+
+
+def tool_schema(name: str, description: str) -> dict[str, Any]:
+    properties: dict[str, Any] = {}
+    if name in {"search_context", "search", "who_is"}:
+        properties["query"] = {"type": "string"}
+    if name in {"read_meeting", "read_dictation", "recap"}:
+        properties["filename"] = {"type": "string"}
+    properties["limit"] = {"type": "integer", "minimum": 1, "maximum": 50}
+    return {
+        "name": name,
+        "description": description,
+        "inputSchema": {"type": "object", "properties": properties, "additionalProperties": False},
+    }
+
+
+def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    limit = int(args.get("limit") or 10)
+    if name == "recent_context":
+        return result_text({"meetings": list_items("meeting", limit), "dictations": list_items("dictation", limit)})
+    if name == "list_meetings":
+        return result_text(list_items("meeting", limit))
+    if name == "list_dictations":
+        return result_text(list_items("dictation", limit))
+    if name == "read_meeting":
+        return result_text(read_text(safe_file(MEETINGS, str(args["filename"]))))
+    if name == "read_dictation":
+        return result_text(read_text(safe_file(DICTATIONS, str(args["filename"]))))
+    if name in {"search_context", "search"}:
+        return result_text(search_all(str(args["query"]), limit))
+    if name == "who_is":
+        return result_text(search_all(str(args["query"]), limit, ["meeting", "dictation"]))
+    if name == "recap":
+        filename = args.get("filename")
+        files = md_files(MEETINGS) + md_files(DICTATIONS)
+        path = safe_file(MEETINGS, str(filename)) if filename else (files[0] if files else None)
+        if path is None:
+            return result_text("No Transcripted captures found.")
+        text = read_text(path, 8000)
+        headings = "\n".join(re.findall(r"(?m)^#{1,3}\s+.+$", text)[:12])
+        return result_text(f"File: {path.name}\n\nHeadings:\n{headings or '[none]'}\n\nExtract:\n{text[:2500]}")
+    raise ValueError(f"unknown tool: {name}")
+
+
+def handle(msg: dict[str, Any]) -> dict[str, Any] | None:
+    method = msg.get("method")
+    msg_id = msg.get("id")
+    try:
+        if method == "initialize":
+            result = {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "transcripted-local-readonly", "version": "0.1.0"},
+            }
+        elif method == "tools/list":
+            result = {"tools": [tool_schema(name, desc) for name, desc in TOOLS]}
+        elif method == "tools/call":
+            params = msg.get("params") or {}
+            result = call_tool(str(params.get("name")), params.get("arguments") or {})
+        elif method in {"notifications/initialized", "$/cancelRequest"}:
+            return None
+        else:
+            raise ValueError(f"unsupported method: {method}")
+        return {"jsonrpc": "2.0", "id": msg_id, "result": result}
+    except Exception as exc:
+        return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(exc)}}
 
 
 def main() -> None:
-    root = Path(os.environ.get("TRANSCRIPTED_CAPTURES_DIR", Path.home() / "Library/Application Support/Transcripted/captures"))
-    print(f"Transcripted captures: {root}")
-    print("Use direct folder fallback until transcripted-mcp stdio server is installed.")
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        response = handle(json.loads(line))
+        if response is not None:
+            print(json.dumps(response, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

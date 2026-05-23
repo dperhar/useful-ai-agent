@@ -18,7 +18,7 @@ final class UsefulAgentApp: NSObject, NSApplicationDelegate {
         menu.addItem(item("Restart", #selector(restart)))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(item("Backup Now", #selector(backup)))
-        menu.addItem(item("Open Local Console", #selector(openConsole)))
+        menu.addItem(item("Show Local Health", #selector(openConsole)))
         menu.addItem(item("Open Telegram Setup", #selector(openTelegram)))
         menu.addItem(item("View Logs", #selector(logs)))
         menu.addItem(NSMenuItem.separator())
@@ -38,7 +38,7 @@ final class UsefulAgentApp: NSObject, NSApplicationDelegate {
     @objc private func restart() { run(["restart"]) }
     @objc private func backup() { run(["backup"]) }
     @objc private func logs() { run(["logs"]) }
-    @objc private func openConsole() { run(["open-console"]) }
+    @objc private func openConsole() { run(["doctor"]) }
     @objc private func openTelegram() { run(["open-telegram-setup"]) }
     @objc private func quit() { NSApplication.shared.terminate(nil) }
 

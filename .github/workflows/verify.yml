@@ -13,11 +13,12 @@ jobs:
       - name: Python package builds
         run: uv build packages/useful-agent
       - name: Python syntax
-        run: python -m py_compile packages/useful-agent/src/useful_agent/cli.py
+        run: python -m py_compile packages/useful-agent/src/useful_agent/cli.py modules/transcripted/transcripted-mcp modules/nanobot/patches/*.py scripts/secret_scan.py
       - name: Secret/path scan
+        run: python scripts/secret_scan.py
+      - name: Shell and plist syntax
         run: |
-          PATTERN='(/Users/a1|Desktop/.;L|Telegram bot token: [0-9]|client_secret|api_key|PRIVATE KEY)'
-          ! grep -RInE "$PATTERN" . \
-            --exclude-dir=.git \
-            --exclude-dir=.github \
-            --exclude='*.md'
+          zsh -n bootstrap/macos.sh modules/backups/templates/backup.sh modules/governance/check.sh modules/nanobot/templates/run-nanobot.sh
+          plutil -lint modules/nanobot/templates/com.usefulaiagent.nanobot.plist
+      - name: Menu bar Swift parse
+        run: swiftc -parse apps/menu-bar/Sources/UsefulAgentMenuBar/main.swift

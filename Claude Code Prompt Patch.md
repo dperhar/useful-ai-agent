@@ -388,13 +388,13 @@ Claude Code в базовом системном промпте содержит
 
 **Контекст инсталляции (важно):**
 - До патча было **три** Claude Code на машине:
-  - `/Users/a1/.local/bin/claude` → native installer `~/.local/share/claude/versions/2.1.97` (активный в PATH)
+  - `~/.local/bin/claude` → native installer `~/.local/share/claude/versions/2.1.97` (активный в PATH)
   - `/opt/homebrew/bin/claude` → Homebrew cask `claude-code` v2.1.85 (не активный, но занимал симлинк)
   - npm global – не был установлен
 - Homebrew cask блокировал `npm install -g` конфликтом симлинка → пришлось `npm install -g --force @anthropic-ai/claude-code` (перетёрло cask'овский симлинк в `/opt/homebrew/bin/claude`)
 
 **Что в итоге активно:**
-- `/Users/a1/.local/bin/claude` → `/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js` (пропатченный, v2.1.98)
+- `~/.local/bin/claude` → `/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js` (пропатченный, v2.1.98)
 - Оригинальный непропатченный `cli.js.backup` рядом с ним
 - Homebrew cask v2.1.85 лежит мёртвым грузом в `/opt/homebrew/Caskroom/claude-code/`
 
@@ -408,7 +408,7 @@ claude --version
 # → "2.1.98 (Claude Code)"
 
 # Куда ссылается симлинк
-readlink /Users/a1/.local/bin/claude
+readlink ~/.local/bin/claude
 # → /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js
 
 # Проверка всех 11 патчей разом
@@ -420,8 +420,8 @@ bash ~/.claude/patch-claude-code.sh --check
 
 **TL;DR команды (copy-paste ready):**
 ```
-To restore: /Users/a1/.claude/patch-claude-code.sh --restore
-To remove:  /Users/a1/.claude/patch-claude-code.sh --unwatch
+To restore: ~/.claude/patch-claude-code.sh --restore
+To remove:  ~/.claude/patch-claude-code.sh --unwatch
 ```
 
 #### Полный откат к оригиналу (native bun binary)
@@ -432,7 +432,7 @@ bash ~/.claude/patch-claude-code.sh --restore
 
 Что сделает:
 1. Восстановит `cli.js` из `cli.js.backup`
-2. Перенаправит симлинк `/Users/a1/.local/bin/claude` обратно на native bun-бинарь `~/.local/share/claude/versions/2.1.97` (или на последнюю версию в `versions/`)
+2. Перенаправит симлинк `~/.local/bin/claude` обратно на native bun-бинарь `~/.local/share/claude/versions/2.1.97` (или на последнюю версию в `versions/`)
 3. Удалит watcher если он был установлен
 
 #### Только снять watcher (патч оставить)

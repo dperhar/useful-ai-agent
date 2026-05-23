@@ -12,5 +12,8 @@ macOS permissions. The harness then reads:
 - `~/Library/Application Support/Transcripted/captures/meetings`
 - `~/Library/Application Support/Transcripted/captures/dictations`
 
-MCP is preferred when available. Direct markdown folder access is the fallback.
-Both modes are read-only.
+The packaged `transcripted-mcp` is a real read-only stdio MCP server backed by
+those markdown folders. It implements recent/search/list/read/who_is/recap
+tools. It does not install Transcripted itself; if no stable official direct
+download is available, install Transcripted manually from the official site and
+let `useful-agent doctor` verify the local capture folders.

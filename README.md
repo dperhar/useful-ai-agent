@@ -47,8 +47,9 @@ zsh /tmp/useful-agent-bootstrap.sh
 
 - Create a Telegram bot in BotFather.
 - Paste the bot token when prompted.
+- Paste at least one allowed Telegram user id when prompted.
 - Approve macOS permissions requested by Transcripted and the menu app.
-- Run `useful-agent check`.
+- Run `useful-agent doctor`.
 
 If the Mac does not yet have Python, the bootstrap installs `uv` from the
 official Astral installer and lets `uv` manage Python.
@@ -58,7 +59,7 @@ official Astral installer and lets `uv` manage Python.
 Use either:
 
 - Telegram bot for daily chat.
-- `http://127.0.0.1:8765` or local WebSocket clients for local integrations.
+- Local WebSocket clients against `127.0.0.1:8765`. This is not a browser UI.
 - Menu-bar app for start/stop/check/backup/update/logs.
 - `useful-agent` CLI for agent-driven maintenance.
 
@@ -66,6 +67,10 @@ Common commands:
 
 ```zsh
 useful-agent check
+useful-agent doctor --json
+useful-agent configure telegram --guided
+useful-agent configure websocket
+useful-agent menu install
 useful-agent start
 useful-agent backup
 useful-agent logs

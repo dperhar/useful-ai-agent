@@ -5,6 +5,7 @@ import getpass
 import json
 import os
 import platform
+import secrets
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,13 +20,25 @@ LAUNCH_AGENTS = Path.home() / "Library/LaunchAgents"
 REPO_DIR = APP_SUPPORT / "source/useful-ai-agent"
 SERVICE = "UsefulAIAgentBackup"
 ACCOUNT = "bundle-password"
+TELEGRAM_SERVICE = "UsefulAIAgentTelegram"
+WEBSOCKET_SERVICE = "UsefulAIAgentWebSocket"
 
 
-def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, check=check, text=True, capture_output=capture)
+def run(cmd: list[str], *, check: bool = True, capture: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=check, text=True, capture_output=capture, input=input_text)
 
 
 def repo_root() -> Path:
+    env = os.environ.get("USEFUL_AGENT_SOURCE_DIR")
+    if env and (Path(env) / "modules").exists():
+        return Path(env)
+
+    source_file = APP_SUPPORT / "source-dir"
+    if source_file.exists():
+        source = Path(source_file.read_text(encoding="utf-8").strip())
+        if (source / "modules").exists():
+            return source
+
     here = Path(__file__).resolve()
     for parent in [here, *here.parents]:
         if (parent / "README.md").exists() and (parent / "modules").exists():
@@ -36,7 +49,7 @@ def repo_root() -> Path:
 
 
 def ensure_dirs() -> None:
-    for path in [APP_SUPPORT, LOG_DIR, WORKSPACE, VAULT, RUNTIME, LAUNCH_AGENTS]:
+    for path in [APP_SUPPORT, LOG_DIR, WORKSPACE, VAULT, RUNTIME, LAUNCH_AGENTS, APP_SUPPORT / "bin"]:
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -59,6 +72,18 @@ def command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def find_uv() -> str | None:
+    for candidate in [
+        shutil.which("uv"),
+        str(Path.home() / ".local/bin/uv"),
+        "/opt/homebrew/bin/uv",
+        "/usr/local/bin/uv",
+    ]:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
 def keychain_get(service: str, account: str) -> str | None:
     try:
         out = run(["security", "find-generic-password", "-w", "-s", service, "-a", account], capture=True)
@@ -67,18 +92,122 @@ def keychain_get(service: str, account: str) -> str | None:
         return None
 
 
-def keychain_set(service: str, account: str, value: str) -> None:
-    run(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", value])
+def keychain_set(service: str, account: str, value: str) -> bool:
+    try:
+        run(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", value])
+        return True
+    except Exception:
+        return False
+
+
+def secret_file(name: str) -> Path:
+    return APP_SUPPORT / "secrets" / name
+
+
+def get_or_create_secret(service: str, account: str, filename: str) -> str:
+    existing = keychain_get(service, account)
+    if existing:
+        return existing
+
+    path = secret_file(filename)
+    if path.exists():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+
+    value = secrets.token_urlsafe(32)
+    if not keychain_set(service, account, value):
+        write(path, value + "\n", 0o600)
+    return value
+
+
+def parse_allowed_users(raw: str | None) -> list[int | str]:
+    if not raw:
+        return []
+    users: list[int | str] = []
+    for part in raw.replace(",", " ").split():
+        if not part:
+            continue
+        users.append(int(part) if part.lstrip("-").isdigit() else part)
+    return users
 
 
 def install_guided(args: argparse.Namespace) -> None:
     ensure_dirs()
+    write(APP_SUPPORT / "source-dir", str(repo_root()) + "\n", 0o644)
+
     if platform.system() != "Darwin":
         raise SystemExit("Useful AI Agent v1 supports macOS only.")
     if platform.machine() not in {"arm64", "aarch64"}:
-        raise SystemExit("Useful AI Agent v1 expects Apple Silicon for the full Transcripted profile.")
+        raise SystemExit("Useful AI Agent v1 expects Apple Silicon for the full native profile.")
 
-    print("Creating router-first workspace...")
+    uv = find_uv()
+    if not uv:
+        raise SystemExit("uv missing. Run bootstrap/macos.sh first.")
+
+    print("1/8 preflight ok")
+    install_workspace()
+
+    print("2/8 installing Python runtime packages")
+    run([uv, "venv", str(RUNTIME / "venv")])
+    python = RUNTIME / "venv/bin/python"
+    nanobot = RUNTIME / "venv/bin/nanobot"
+    run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
+    run([str(python), "-m", "pip", "install", "nanobot-ai", "mempalace", "httpx"])
+
+    print("3/8 installing skills")
+    install_skills()
+
+    print("4/8 configuring Telegram and WebSocket")
+    token, allowed_users = collect_telegram(args)
+    websocket_secret = get_or_create_secret(WEBSOCKET_SERVICE, "token-issue-secret", "websocket-token-issue-secret")
+    config = build_nanobot_config(token, allowed_users, websocket_secret)
+    write(APP_SUPPORT / "nanobot/config.json", json.dumps(config, indent=2) + "\n", 0o600)
+
+    print("5/8 installing local MCP/tools")
+    copy_template("modules/transcripted/transcripted-mcp", APP_SUPPORT / "bin/transcripted-mcp", {}, 0o755)
+    copy_template("modules/backups/templates/backup.sh", APP_SUPPORT / "bin/backup.sh", {
+        "WORKSPACE": str(WORKSPACE),
+        "VAULT": str(VAULT),
+        "SERVICE": SERVICE,
+        "ACCOUNT": ACCOUNT,
+    }, 0o755)
+    copy_template("modules/governance/check.sh", APP_SUPPORT / "bin/check.sh", {
+        "APP_SUPPORT": str(APP_SUPPORT),
+        "WORKSPACE": str(WORKSPACE),
+    }, 0o755)
+
+    print("6/8 applying Nanobot runtime patches")
+    apply_nanobot_patches(python)
+
+    print("7/8 installing LaunchAgent and desktop helpers")
+    copy_template("modules/nanobot/templates/run-nanobot.sh", APP_SUPPORT / "bin/run-nanobot.sh", {
+        "APP_SUPPORT": str(APP_SUPPORT),
+        "WORKSPACE": str(WORKSPACE),
+        "NANOBOT": str(nanobot),
+    }, 0o755)
+    copy_template("modules/nanobot/templates/com.usefulaiagent.nanobot.plist", LAUNCH_AGENTS / "com.usefulaiagent.nanobot.plist", {
+        "APP_SUPPORT": str(APP_SUPPORT),
+    })
+    install_desktop_helpers()
+
+    print("8/8 smoke tests")
+    failures = smoke_test(nanobot)
+    if failures:
+        print("Install stopped before LaunchAgent start:")
+        for failure in failures:
+            print(f"- {failure}")
+        print("Fix the items above, then run useful-agent start.")
+        return
+
+    run(["launchctl", "bootout", f"gui/{os.getuid()}/com.usefulaiagent.nanobot"], check=False)
+    run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(LAUNCH_AGENTS / "com.usefulaiagent.nanobot.plist")], check=False)
+    run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.usefulaiagent.nanobot"], check=False)
+    check(argparse.Namespace(json=False))
+
+
+def install_workspace() -> None:
+    print("Creating router-first workspace")
     replacements = {"WORKSPACE": str(WORKSPACE)}
     copy_template("modules/router/templates/AGENTS.md", WORKSPACE / "AGENTS.md", replacements)
     copy_template("modules/router/templates/CLAUDE.md", WORKSPACE / "CLAUDE.md", replacements)
@@ -87,15 +216,8 @@ def install_guided(args: argparse.Namespace) -> None:
         (WORKSPACE / folder).mkdir(parents=True, exist_ok=True)
     copy_template("modules/router/templates/scoped-harness-AGENTS.md", WORKSPACE / "Harness/AGENTS.md", replacements)
 
-    print("Installing Python packages in managed runtime...")
-    if not command_exists("uv"):
-        raise SystemExit("uv missing. Re-run bootstrap/macos.sh.")
-    run(["uv", "venv", str(RUNTIME / "venv")])
-    python = RUNTIME / "venv/bin/python"
-    run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
-    run([str(python), "-m", "pip", "install", "nanobot-ai", "mempalace"])
 
-    print("Installing skills...")
+def install_skills() -> None:
     skills_dst = WORKSPACE / "Harness/skills"
     skills_dst.mkdir(parents=True, exist_ok=True)
     for src in (repo_root() / "skills").glob("*"):
@@ -112,62 +234,43 @@ def install_guided(args: argparse.Namespace) -> None:
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
 
-    print("Writing Nanobot config...")
-    token = args.telegram_token or keychain_get("UsefulAIAgentTelegram", "bot-token")
+
+def collect_telegram(args: argparse.Namespace) -> tuple[str | None, list[int | str]]:
+    token = args.telegram_token or keychain_get(TELEGRAM_SERVICE, "bot-token")
     if not token and args.guided:
-        print("Create a bot in Telegram BotFather, enable required modes, then paste the token.")
-        token = getpass.getpass("Telegram bot token: ").strip()
+        print("Create a Telegram bot in BotFather. Enable Guest Chat Mode, Allow Groups, and Group Privacy as needed.")
+        token = getpass.getpass("Telegram bot token (hidden): ").strip()
     if token:
-        keychain_set("UsefulAIAgentTelegram", "bot-token", token)
-    else:
-        print("WARN: Telegram token not configured. Run useful-agent install --telegram-token TOKEN later.")
+        keychain_set(TELEGRAM_SERVICE, "bot-token", token)
 
-    nanobot_config = build_nanobot_config(token or "PASTE_TOKEN_FROM_KEYCHAIN")
-    write(APP_SUPPORT / "nanobot/config.json", json.dumps(nanobot_config, indent=2) + "\n", 0o600)
-    copy_template("modules/nanobot/templates/run-nanobot.sh", APP_SUPPORT / "bin/run-nanobot.sh", {
-        "APP_SUPPORT": str(APP_SUPPORT),
-        "WORKSPACE": str(WORKSPACE),
-        "PYTHON": str(python),
-    }, 0o755)
-    copy_template("modules/nanobot/templates/com.usefulaiagent.nanobot.plist", LAUNCH_AGENTS / "com.usefulaiagent.nanobot.plist", {
-        "APP_SUPPORT": str(APP_SUPPORT),
-    })
-    copy_template("modules/transcripted/transcripted-mcp", APP_SUPPORT / "bin/transcripted-mcp", {}, 0o755)
+    allowed_users = parse_allowed_users(args.allow_user)
+    if not allowed_users and args.guided and token:
+        print("Telegram needs at least one allowed user id. Get it from @userinfobot or Telegram bot logs.")
+        allowed_users = parse_allowed_users(input("Allowed Telegram user id(s), comma separated: ").strip())
 
-    print("Writing backup and health scripts...")
-    copy_template("modules/backups/templates/backup.sh", APP_SUPPORT / "bin/backup.sh", {
-        "WORKSPACE": str(WORKSPACE),
-        "VAULT": str(VAULT),
-        "SERVICE": SERVICE,
-        "ACCOUNT": ACCOUNT,
-    }, 0o755)
-    copy_template("modules/governance/check.sh", APP_SUPPORT / "bin/check.sh", {
-        "APP_SUPPORT": str(APP_SUPPORT),
-        "WORKSPACE": str(WORKSPACE),
-    }, 0o755)
-
-    desktop = Path.home() / "Desktop"
-    if desktop.exists():
-        write(desktop / "Start Useful AI Agent.command", f'#!/bin/zsh\n"{APP_SUPPORT}/bin/run-nanobot.sh"\n', 0o755)
-        write(desktop / "Check Useful AI Agent.command", f'#!/bin/zsh\n"{APP_SUPPORT}/bin/check.sh"; read "?Press enter to close."\n', 0o755)
-
-    print("Installing LaunchAgent...")
-    run(["launchctl", "bootout", f"gui/{os.getuid()}/com.usefulaiagent.nanobot"], check=False)
-    run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(LAUNCH_AGENTS / "com.usefulaiagent.nanobot.plist")], check=False)
-
-    print("Transcripted setup:")
-    print("- Install from official source: https://transcripted.app/")
-    print("- Approve microphone/screen/audio permissions.")
-    print("- Then run useful-agent check.")
-    check(argparse.Namespace(json=False))
+    if token and not allowed_users:
+        print("WARN: Telegram token is set, but allowed users are empty. Telegram channel will stay disabled.")
+    return token, allowed_users
 
 
-def build_nanobot_config(token: str) -> dict:
+def build_nanobot_config(token: str | None, allowed_users: list[int | str], websocket_secret: str) -> dict:
+    telegram_enabled = bool(token and allowed_users)
     return {
         "agents": {"defaults": {"workspace": str(WORKSPACE), "reasoningEffort": "medium"}},
         "channels": {
-            "telegram": {"enabled": True, "token": token, "allowFrom": []},
-            "websocket": {"enabled": True, "host": "127.0.0.1", "port": 8765, "websocketRequiresToken": True},
+            "telegram": {
+                "enabled": telegram_enabled,
+                "token": token or "",
+                "allowFrom": allowed_users,
+                "guestMode": {"enabled": True, "replyMode": "final_only"},
+            },
+            "websocket": {
+                "enabled": True,
+                "host": "127.0.0.1",
+                "port": 8765,
+                "websocketRequiresToken": True,
+                "tokenIssueSecret": websocket_secret,
+            },
         },
         "tools": {
             "mcpServers": {
@@ -189,26 +292,123 @@ def build_nanobot_config(token: str) -> dict:
     }
 
 
-def check(args: argparse.Namespace) -> None:
-    ensure_dirs()
-    checks = [
-        ("macOS", platform.system() == "Darwin"),
-        ("Apple Silicon", platform.machine() in {"arm64", "aarch64"}),
-        ("uv", command_exists("uv")),
-        ("git", command_exists("git")),
-        ("workspace", (WORKSPACE / "AGENTS.md").exists()),
-        ("nanobot config", (APP_SUPPORT / "nanobot/config.json").exists()),
-        ("nanobot launcher", (APP_SUPPORT / "bin/run-nanobot.sh").exists()),
-        ("mempalace venv", (RUNTIME / "venv/bin/mempalace").exists()),
-        ("transcripted app data", (Path.home() / "Library/Application Support/Transcripted/captures").exists()),
-        ("backup vault", VAULT.exists()),
+def apply_nanobot_patches(python: Path) -> None:
+    patch_dir = repo_root() / "modules/nanobot/patches"
+    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py"]:
+        run([str(python), str(patch_dir / script)])
+
+
+def smoke_test(nanobot: Path) -> list[str]:
+    failures: list[str] = []
+    if not nanobot.exists():
+        failures.append(f"nanobot console script missing: {nanobot}")
+    config_path = APP_SUPPORT / "nanobot/config.json"
+    if not config_path.exists():
+        failures.append("Nanobot config missing")
+    else:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        telegram = config.get("channels", {}).get("telegram", {})
+        if telegram.get("enabled") and not telegram.get("allowFrom"):
+            failures.append("Telegram enabled with empty allowFrom")
+        websocket = config.get("channels", {}).get("websocket", {})
+        if websocket.get("enabled") and not websocket.get("tokenIssueSecret"):
+            failures.append("WebSocket enabled without tokenIssueSecret")
+    patch_failures = verify_nanobot_patches()
+    failures.extend(patch_failures)
+    return failures
+
+
+def verify_nanobot_patches() -> list[str]:
+    failures: list[str] = []
+    target = RUNTIME / "venv/lib"
+    loop_files = list(target.glob("python*/site-packages/nanobot/agent/loop.py"))
+    telegram_files = list(target.glob("python*/site-packages/nanobot/channels/telegram.py"))
+    if not loop_files or "_useful_agent_extract_one_turn_reasoning_effort" not in loop_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot effort patch marker missing")
+    if not telegram_files or "_on_guest_update" not in telegram_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot guest mode patch marker missing")
+    return failures
+
+
+def install_desktop_helpers() -> None:
+    desktop = Path.home() / "Desktop"
+    if desktop.exists():
+        write(desktop / "Start Useful AI Agent.command", f'#!/bin/zsh\n"{APP_SUPPORT}/bin/run-nanobot.sh"\n', 0o755)
+        write(desktop / "Check Useful AI Agent.command", f'#!/bin/zsh\n"useful-agent" doctor; read "?Press enter to close."\n', 0o755)
+
+
+def doctor_status() -> list[dict[str, object]]:
+    config_path = APP_SUPPORT / "nanobot/config.json"
+    config: dict = {}
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            config = {}
+    telegram = config.get("channels", {}).get("telegram", {}) if config else {}
+    websocket = config.get("channels", {}).get("websocket", {}) if config else {}
+    return [
+        {"name": "macOS", "ok": platform.system() == "Darwin"},
+        {"name": "Apple Silicon", "ok": platform.machine() in {"arm64", "aarch64"}},
+        {"name": "uv", "ok": find_uv() is not None},
+        {"name": "git", "ok": command_exists("git")},
+        {"name": "workspace AGENTS.md", "ok": (WORKSPACE / "AGENTS.md").exists()},
+        {"name": "nanobot config", "ok": config_path.exists()},
+        {"name": "nanobot launcher", "ok": (APP_SUPPORT / "bin/run-nanobot.sh").exists()},
+        {"name": "nanobot console script", "ok": (RUNTIME / "venv/bin/nanobot").exists()},
+        {"name": "telegram allowed users", "ok": bool(telegram.get("allowFrom")), "enabled": bool(telegram.get("enabled"))},
+        {"name": "websocket local-only", "ok": websocket.get("host") == "127.0.0.1"},
+        {"name": "websocket secret", "ok": bool(websocket.get("tokenIssueSecret"))},
+        {"name": "mempalace mcp", "ok": (RUNTIME / "venv/bin/mempalace-mcp").exists()},
+        {"name": "transcripted captures", "ok": (Path.home() / "Library/Application Support/Transcripted/captures").exists()},
+        {"name": "backup vault", "ok": VAULT.exists()},
     ]
-    status = [{"name": name, "ok": ok} for name, ok in checks]
+
+
+def check(args: argparse.Namespace) -> None:
+    status = doctor_status()
     if args.json:
         print(json.dumps(status, indent=2))
         return
     for item in status:
-        print(("OK   " if item["ok"] else "WARN ") + item["name"])
+        print(("OK   " if item["ok"] else "WARN ") + str(item["name"]))
+
+
+def configure_telegram(args: argparse.Namespace) -> None:
+    ensure_dirs()
+    token, allowed_users = collect_telegram(args)
+    config_path = APP_SUPPORT / "nanobot/config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else build_nanobot_config(None, [], get_or_create_secret(WEBSOCKET_SERVICE, "token-issue-secret", "websocket-token-issue-secret"))
+    config["channels"]["telegram"] = build_nanobot_config(token, allowed_users, config["channels"]["websocket"].get("tokenIssueSecret") or get_or_create_secret(WEBSOCKET_SERVICE, "token-issue-secret", "websocket-token-issue-secret"))["channels"]["telegram"]
+    write(config_path, json.dumps(config, indent=2) + "\n", 0o600)
+    print("Telegram config updated. Run useful-agent restart.")
+
+
+def configure_websocket(_: argparse.Namespace) -> None:
+    ensure_dirs()
+    secret = get_or_create_secret(WEBSOCKET_SERVICE, "token-issue-secret", "websocket-token-issue-secret")
+    config_path = APP_SUPPORT / "nanobot/config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else build_nanobot_config(None, [], secret)
+    config.setdefault("channels", {}).setdefault("websocket", {})
+    config["channels"]["websocket"].update({
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8765,
+        "websocketRequiresToken": True,
+        "tokenIssueSecret": secret,
+    })
+    write(config_path, json.dumps(config, indent=2) + "\n", 0o600)
+    print("WebSocket secret configured in Keychain or local 0600 fallback. It was not printed.")
+
+
+def configure_adapters(args: argparse.Namespace) -> None:
+    target = Path(args.target).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    replacements = {"WORKSPACE": str(target)}
+    copy_template("modules/router/templates/AGENTS.md", target / "AGENTS.md", replacements)
+    copy_template("modules/router/templates/CLAUDE.md", target / "CLAUDE.md", replacements)
+    copy_template("modules/router/templates/cursor-router.mdc", target / ".cursor/rules/useful-agent-router.mdc", replacements)
+    print(f"Installed Codex/Claude/Cursor workspace adapters in {target}")
 
 
 def start(_: argparse.Namespace) -> None:
@@ -234,11 +434,37 @@ def backup(_: argparse.Namespace) -> None:
 
 
 def open_console(_: argparse.Namespace) -> None:
-    run(["open", "http://127.0.0.1:8765"], check=False)
+    print("Nanobot WebSocket is local-only at 127.0.0.1:8765 and is not a browser console.")
+    print("Run: useful-agent doctor")
 
 
 def open_telegram(_: argparse.Namespace) -> None:
     run(["open", "tg://resolve?domain=BotFather"], check=False)
+
+
+def menu_install(_: argparse.Namespace) -> None:
+    ensure_dirs()
+    app_dir = Path.home() / "Applications/Useful Agent.app"
+    macos = app_dir / "Contents/MacOS"
+    resources = app_dir / "Contents/Resources"
+    macos.mkdir(parents=True, exist_ok=True)
+    resources.mkdir(parents=True, exist_ok=True)
+    binary = macos / "UsefulAgentMenuBar"
+    source = repo_root() / "apps/menu-bar/Sources/UsefulAgentMenuBar/main.swift"
+    run(["swiftc", str(source), "-o", str(binary)])
+    binary.chmod(0o755)
+    write(app_dir / "Contents/Info.plist", """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>UsefulAgentMenuBar</string>
+<key>CFBundleIdentifier</key><string>com.usefulaiagent.menubar</string>
+<key>CFBundleName</key><string>Useful Agent</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+""")
+    run(["open", str(app_dir)], check=False)
+    print(f"Installed unsigned local menu bar app: {app_dir}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -248,11 +474,29 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("install")
     p.add_argument("--guided", action="store_true")
     p.add_argument("--telegram-token")
+    p.add_argument("--allow-user")
     p.set_defaults(func=install_guided)
 
-    p = sub.add_parser("check")
-    p.add_argument("--json", action="store_true")
-    p.set_defaults(func=check)
+    for name in ["check", "doctor"]:
+        p = sub.add_parser(name)
+        p.add_argument("--json", action="store_true")
+        p.set_defaults(func=check)
+
+    configure = sub.add_parser("configure")
+    configure_sub = configure.add_subparsers(dest="configure_cmd", required=True)
+    p = configure_sub.add_parser("telegram")
+    p.add_argument("--guided", action="store_true")
+    p.add_argument("--telegram-token")
+    p.add_argument("--allow-user")
+    p.set_defaults(func=configure_telegram)
+    configure_sub.add_parser("websocket").set_defaults(func=configure_websocket)
+    p = configure_sub.add_parser("adapters")
+    p.add_argument("--target", default=str(WORKSPACE))
+    p.set_defaults(func=configure_adapters)
+
+    menu = sub.add_parser("menu")
+    menu_sub = menu.add_subparsers(dest="menu_cmd", required=True)
+    menu_sub.add_parser("install").set_defaults(func=menu_install)
 
     sub.add_parser("start").set_defaults(func=start)
     sub.add_parser("stop").set_defaults(func=stop)
@@ -261,7 +505,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("backup").set_defaults(func=backup)
     sub.add_parser("open-console").set_defaults(func=open_console)
     sub.add_parser("open-telegram-setup").set_defaults(func=open_telegram)
-    sub.add_parser("update").set_defaults(func=lambda _: run(["uv", "tool", "upgrade", "useful-agent"], check=False))
+    sub.add_parser("update").set_defaults(func=lambda _: run([find_uv() or "uv", "tool", "upgrade", "useful-agent"], check=False))
     sub.add_parser("uninstall").set_defaults(func=lambda _: print("Run docs/uninstall.md checklist; workspace/backups are never auto-deleted."))
 
     args = parser.parse_args(argv)

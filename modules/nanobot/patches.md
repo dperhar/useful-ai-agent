@@ -1,7 +1,9 @@
 # Nanobot Compatibility Patches
 
-These are the behaviors the harness applies or verifies when upstream Nanobot
-does not support them natively yet.
+These are the behaviors the harness applies and verifies when upstream Nanobot
+does not support them natively yet. The installer runs scripts in
+`modules/nanobot/patches/` after `nanobot-ai` is installed and refuses to start
+the LaunchAgent if patch markers are missing.
 
 ## One-Turn Effort Markers
 
