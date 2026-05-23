@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Minimal read-only Transcripted MCP placeholder.
+
+Production installer wires this to the official Transcripted MCP binary when
+available. This fallback exists so agents can still read local Transcripted
+markdown captures without write access.
+"""
+
+import os
+from pathlib import Path
+
+
+def main() -> None:
+    root = Path(os.environ.get("TRANSCRIPTED_CAPTURES_DIR", Path.home() / "Library/Application Support/Transcripted/captures"))
+    print(f"Transcripted captures: {root}")
+    print("Use direct folder fallback until transcripted-mcp stdio server is installed.")
+
+
+if __name__ == "__main__":
+    main()

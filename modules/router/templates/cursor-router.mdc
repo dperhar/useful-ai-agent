@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+description: Useful AI Agent root router
+---
+
+For any work in this workspace, first read `AGENTS.md`.
+Then read scoped `AGENTS.md` files on the path to the target file, root-to-leaf.
+Do not read sibling scoped routers unless the task explicitly touches them.

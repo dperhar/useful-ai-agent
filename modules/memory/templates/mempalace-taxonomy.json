@@ -1,0 +1,16 @@
+{
+  "wings": [
+    "user",
+    "projects",
+    "clients",
+    "meetings",
+    "agent_ops",
+    "archive"
+  ],
+  "rules": {
+    "source_of_truth": "markdown",
+    "memory_role": "retrieval_and_write_support",
+    "reconcile_after_durable_fact": true,
+    "reconcile_before_compaction": true
+  }
+}
