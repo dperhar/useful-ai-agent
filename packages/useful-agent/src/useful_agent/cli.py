@@ -294,7 +294,7 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
 
 def apply_nanobot_patches(python: Path) -> None:
     patch_dir = repo_root() / "modules/nanobot/patches"
-    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py"]:
+    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py"]:
         run([str(python), str(patch_dir / script)])
 
 
@@ -329,6 +329,8 @@ def verify_nanobot_patches() -> list[str]:
         failures.append("Nanobot guest mode patch marker missing")
     if not telegram_files or "_extract_text_quote" not in telegram_files[0].read_text(encoding="utf-8"):
         failures.append("Nanobot quote patch marker missing")
+    if not telegram_files or "TELEGRAM_MEDIA_GROUP_DEBOUNCE_SECONDS" not in telegram_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot chat hardening patch marker missing")
     return failures
 
 

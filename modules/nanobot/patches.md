@@ -45,3 +45,14 @@ Telegram selected quote replies arrive as `message.quote` / raw
 `api_kwargs["quote"]`, not as `reply_to_message.text`. The quote patch sends
 the selected fragment to the agent as `[Quote from bot: ...]`. If no quote is
 present, it falls back to the full replied message.
+
+## Chat Hardening
+
+`patch_nanobot_chat_hardening.py` fixes three Telegram runtime edge cases:
+
+- Routes `/high`, `/xhigh`, `/improve`, `/effort`, and `/think` even when
+  Telegram sends group commands as `/cmd@bot_username`.
+- Debounces albums/media groups for 2.5 seconds and resets the timer on every
+  incoming album item, reducing accidental split requests.
+- On Telegram HTML parse fallback, sends stripped plain text instead of raw
+  Markdown, so users do not see `**bold**` markers.
