@@ -71,8 +71,12 @@ Telegram `custom_emoji_id` values. Send `/emoji_id <custom emoji>` to the bot;
 it saves the first custom emoji entity and uses it for the Guest Mode
 placeholder marker.
 
-Default placeholder text:
+Default placeholder carrier:
 
 ```text
-Ж жгу американское электричество
+⚡
 ```
+
+After `/emoji_id <custom emoji>` is configured, Telegram renders the saved
+custom emoji over that carrier, so the visible placeholder is only the custom
+emoji.
