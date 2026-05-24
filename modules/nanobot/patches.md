@@ -57,3 +57,9 @@ present, it falls back to the full replied message.
   incoming album item, reducing accidental split requests.
 - On Telegram HTML parse fallback, sends stripped plain text instead of raw
   Markdown, so users do not see `**bold**` markers.
+
+## Codex Error Diagnostics
+
+`patch_nanobot_codex_errors.py` prevents empty user-facing errors like
+`Error calling Codex:`. If the upstream exception has no message, the bot now
+returns the exception class and logs a full traceback in the runtime logs.

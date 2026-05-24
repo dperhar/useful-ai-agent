@@ -294,7 +294,7 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
 
 def apply_nanobot_patches(python: Path) -> None:
     patch_dir = repo_root() / "modules/nanobot/patches"
-    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py"]:
+    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py", "patch_nanobot_codex_errors.py"]:
         run([str(python), str(patch_dir / script)])
 
 
@@ -331,6 +331,9 @@ def verify_nanobot_patches() -> list[str]:
         failures.append("Nanobot quote patch marker missing")
     if not telegram_files or "TELEGRAM_MEDIA_GROUP_DEBOUNCE_SECONDS" not in telegram_files[0].read_text(encoding="utf-8"):
         failures.append("Nanobot chat hardening patch marker missing")
+    codex_files = list(target.glob("python*/site-packages/nanobot/providers/openai_codex_provider.py"))
+    if not codex_files or "Codex provider call failed" not in codex_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot Codex error diagnostics patch marker missing")
     return failures
 
 
