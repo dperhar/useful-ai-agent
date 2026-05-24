@@ -38,3 +38,10 @@ Until the Telegram library exposes Guest Mode directly, the harness expects:
 
 Default is `final_only` because some desktop clients can show the initial guest
 message but fail to repaint inline edits.
+
+## Telegram Quote Replies
+
+Telegram selected quote replies arrive as `message.quote` / raw
+`api_kwargs["quote"]`, not as `reply_to_message.text`. The quote patch sends
+the selected fragment to the agent as `[Quote from bot: ...]`. If no quote is
+present, it falls back to the full replied message.
