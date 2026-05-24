@@ -30,7 +30,7 @@ def patch() -> None:
         text = text.replace(
             "TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message\n",
             "TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message\n"
-            "TELEGRAM_MEDIA_GROUP_DEBOUNCE_SECONDS = float(os.environ.get(\"NANOBOT_MEDIA_GROUP_DEBOUNCE_SECONDS\", \"2.5\"))\n",
+            "TELEGRAM_MEDIA_GROUP_DEBOUNCE_SECONDS = float(os.environ.get(\"NANOBOT_MEDIA_GROUP_DEBOUNCE_SECONDS\", \"15\"))\n",
             1,
         )
 

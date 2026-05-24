@@ -52,7 +52,7 @@ present, it falls back to the full replied message.
 
 - Routes `/high`, `/xhigh`, `/improve`, `/effort`, and `/think` even when
   Telegram sends group commands as `/cmd@bot_username`.
-- Debounces albums/media groups for 2.5 seconds and resets the timer on every
+- Debounces photo/video albums/media groups for 15 seconds and resets the timer on every
   incoming album item, reducing accidental split requests.
 - On Telegram HTML parse fallback, sends stripped plain text instead of raw
   Markdown, so users do not see `**bold**` markers.
