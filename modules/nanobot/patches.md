@@ -33,11 +33,12 @@ Until the Telegram library exposes Guest Mode directly, the harness expects:
 
 - polling includes `guest_message`;
 - guest updates are read from raw update kwargs;
-- final replies are sent with Bot API `answerGuestQuery`;
-- streaming placeholder mode is opt-in only after client compatibility check.
+- guest queries are answered immediately with a placeholder;
+- final replies edit the created inline guest message when the agent finishes;
+- empty/progress outbound events must never consume the one allowed guest answer.
 
-Default is `final_only` because some desktop clients can show the initial guest
-message but fail to repaint inline edits.
+Default is `placeholder` because Telegram guest queries expire quickly. Long
+tool calls cannot reliably wait for a final-only answer.
 
 ## Telegram Quote Replies
 

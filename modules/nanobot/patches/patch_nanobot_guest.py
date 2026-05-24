@@ -45,7 +45,7 @@ HELPERS = r'''
         content = self._useful_agent_guest_content_from_raw(raw, bot_username)
         metadata = self._useful_agent_guest_metadata(raw, caller, guest_query_id)
 
-        if os.environ.get("NANOBOT_GUEST_REPLY_MODE", "final_only").strip().lower() == "placeholder":
+        if os.environ.get("NANOBOT_GUEST_REPLY_MODE", "placeholder").strip().lower() == "placeholder":
             try:
                 placeholder = os.environ.get("NANOBOT_GUEST_PLACEHOLDER_TEXT", "Шнырь готовит ответ...")
                 inline_message_id = await self._useful_agent_answer_guest_query(guest_query_id, placeholder)
@@ -179,9 +179,13 @@ def patch() -> None:
         "            self.logger.warning(\"bot not running\")\n"
         "            return\n\n"
         "        if msg.metadata.get(\"guest_inline_message_id\"):\n"
+        "            if not (msg.content or \"\").strip() or msg.metadata.get(\"_progress\", False):\n"
+        "                return\n"
         "            await self._useful_agent_edit_guest_inline_message(str(msg.metadata[\"guest_inline_message_id\"]), msg.content)\n"
         "            return\n\n"
         "        if msg.metadata.get(\"guest_query_id\"):\n"
+        "            if not (msg.content or \"\").strip() or msg.metadata.get(\"_progress\", False):\n"
+        "                return\n"
         "            await self._useful_agent_answer_guest_query(str(msg.metadata[\"guest_query_id\"]), msg.content)\n"
         "            return\n\n"
         "        # Only stop typing indicator and remove reaction for final responses\n",
