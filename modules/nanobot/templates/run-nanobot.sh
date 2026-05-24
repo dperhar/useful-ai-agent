@@ -10,4 +10,9 @@ LOG_DIR="$HOME/Library/Logs/UsefulAIAgent"
 mkdir -p "$LOG_DIR"
 cd "$WORKSPACE"
 
+export NANOBOT_GUEST_REPLY_MODE="${NANOBOT_GUEST_REPLY_MODE:-placeholder}"
+export NANOBOT_GUEST_PLACEHOLDER_TEXT="${NANOBOT_GUEST_PLACEHOLDER_TEXT:-Ж жгу американское электричество}"
+export NANOBOT_GUEST_CUSTOM_EMOJI_MARKER="${NANOBOT_GUEST_CUSTOM_EMOJI_MARKER:-Ж}"
+export NANOBOT_GUEST_CUSTOM_EMOJI_ID_FILE="${NANOBOT_GUEST_CUSTOM_EMOJI_ID_FILE:-$APP_SUPPORT/nanobot/guest-custom-emoji-id}"
+
 exec "$NANOBOT" gateway --config "$CONFIG" >> "$LOG_DIR/nanobot.log" 2>&1

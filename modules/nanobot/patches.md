@@ -63,3 +63,16 @@ present, it falls back to the full replied message.
 `patch_nanobot_codex_errors.py` prevents empty user-facing errors like
 `Error calling Codex:`. If the upstream exception has no message, the bot now
 returns the exception class and logs a full traceback in the runtime logs.
+
+## Guest Placeholder Custom Emoji
+
+`patch_nanobot_custom_emoji.py` adds `/emoji_id` for extracting and persisting
+Telegram `custom_emoji_id` values. Send `/emoji_id <custom emoji>` to the bot;
+it saves the first custom emoji entity and uses it for the Guest Mode
+placeholder marker.
+
+Default placeholder text:
+
+```text
+Ж жгу американское электричество
+```
