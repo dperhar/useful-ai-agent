@@ -10,6 +10,9 @@ Nanobot provides the always-on chat interface.
 - One-turn markers: `high`, `xhigh`, `/high`, `/xhigh`, `high -`, `xhigh -`.
 - `/improve` expands to the installed improve workflow.
 - Guest Mode uses final-only replies by default for desktop compatibility.
+- Image generation uses Nanobot's `generate_image` tool with provider
+  `codex_cli`, which invokes Codex CLI `$imagegen` and sends generated PNGs
+  through Telegram media.
 
 ## Manual BotFather Setup
 
@@ -24,3 +27,14 @@ Add allowed Telegram user IDs before sharing the bot.
 
 The installer applies runtime patches after `nanobot-ai` is installed and
 stops before LaunchAgent start if patch markers are missing.
+
+## Image Generation
+
+Requirements:
+
+- `codex` CLI installed.
+- `codex login` completed for the same macOS user running Nanobot.
+- `CODEX_HOME` points to that user's `.codex` directory.
+
+This path uses Codex/ChatGPT subscription usage limits. It does not require an
+OpenAI API key and does not use OpenAI API billing.

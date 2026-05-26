@@ -20,6 +20,8 @@ After install, run useful-agent check and fix anything red.
   `CLAUDE.md`, and Cursor rules.
 - Local markdown source of truth plus MemPalace retrieval/write memory.
 - Nanobot Telegram agent with local WebSocket on `127.0.0.1`.
+- Subscription-backed image generation through Codex CLI `$imagegen`, delivered
+  back to Telegram as Nanobot media.
 - Transcripted meeting/dictation context through read-only MCP.
 - Skills for setup, cleanup, `/improve`, memory reconciliation, Telegram ops,
   backups, and voice/style customization.
@@ -48,6 +50,8 @@ zsh /tmp/useful-agent-bootstrap.sh
 - Create a Telegram bot in BotFather.
 - Paste the bot token when prompted.
 - Paste at least one allowed Telegram user id when prompted.
+- Install and log in to Codex CLI if you want image generation via subscription
+  limits instead of OpenAI API billing.
 - Approve macOS permissions requested by Transcripted and the menu app.
 - Run `useful-agent doctor`.
 

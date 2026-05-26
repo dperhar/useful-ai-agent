@@ -9,6 +9,8 @@ Only these sources are allowed by default:
 - Transcripted: `https://transcripted.app/` and official links from that site
 - Telegram docs: `https://core.telegram.org/bots/`
 - Apple developer/macOS docs: `https://developer.apple.com/`
+- Codex CLI: `https://developers.openai.com/codex/` and official OpenAI
+  package channels documented from there.
 - Claude docs: `https://docs.claude.com/`
 - Cursor docs: `https://docs.cursor.com/`
 - OpenAI docs: `https://developers.openai.com/` and `https://platform.openai.com/docs`

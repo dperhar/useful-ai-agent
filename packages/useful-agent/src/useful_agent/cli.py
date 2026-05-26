@@ -273,6 +273,14 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
             },
         },
         "tools": {
+            "imageGeneration": {
+                "enabled": True,
+                "provider": "codex_cli",
+                "model": "gpt-image-2",
+                "defaultAspectRatio": "4:5",
+                "defaultImageSize": "1K",
+                "maxImagesPerTurn": 2,
+            },
             "mcpServers": {
                 "mempalace": {
                     "command": str(RUNTIME / "venv/bin/mempalace-mcp"),
@@ -294,7 +302,7 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
 
 def apply_nanobot_patches(python: Path) -> None:
     patch_dir = repo_root() / "modules/nanobot/patches"
-    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py", "patch_nanobot_codex_errors.py", "patch_nanobot_custom_emoji.py"]:
+    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py", "patch_nanobot_codex_errors.py", "patch_nanobot_custom_emoji.py", "patch_nanobot_codex_image_generation.py"]:
         run([str(python), str(patch_dir / script)])
 
 
@@ -336,6 +344,11 @@ def verify_nanobot_patches() -> list[str]:
     codex_files = list(target.glob("python*/site-packages/nanobot/providers/openai_codex_provider.py"))
     if not codex_files or "Codex provider call failed" not in codex_files[0].read_text(encoding="utf-8"):
         failures.append("Nanobot Codex error diagnostics patch marker missing")
+    image_files = list(target.glob("python*/site-packages/nanobot/agent/tools/image_generation.py"))
+    if not image_files or "_CodexCLIImageGenerationClient" not in image_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot Codex CLI image generation patch marker missing")
+    if not command_exists("codex"):
+        failures.append("Codex CLI missing. Install/login to Codex before enabling subscription image generation.")
     return failures
 
 
@@ -361,6 +374,7 @@ def doctor_status() -> list[dict[str, object]]:
         {"name": "Apple Silicon", "ok": platform.machine() in {"arm64", "aarch64"}},
         {"name": "uv", "ok": find_uv() is not None},
         {"name": "git", "ok": command_exists("git")},
+        {"name": "codex cli", "ok": command_exists("codex")},
         {"name": "workspace AGENTS.md", "ok": (WORKSPACE / "AGENTS.md").exists()},
         {"name": "nanobot config", "ok": config_path.exists()},
         {"name": "nanobot launcher", "ok": (APP_SUPPORT / "bin/run-nanobot.sh").exists()},
@@ -368,6 +382,7 @@ def doctor_status() -> list[dict[str, object]]:
         {"name": "telegram allowed users", "ok": bool(telegram.get("allowFrom")), "enabled": bool(telegram.get("enabled"))},
         {"name": "websocket local-only", "ok": websocket.get("host") == "127.0.0.1"},
         {"name": "websocket secret", "ok": bool(websocket.get("tokenIssueSecret"))},
+        {"name": "image generation via Codex CLI", "ok": config.get("tools", {}).get("imageGeneration", {}).get("provider") == "codex_cli"},
         {"name": "mempalace mcp", "ok": (RUNTIME / "venv/bin/mempalace-mcp").exists()},
         {"name": "transcripted captures", "ok": (Path.home() / "Library/Application Support/Transcripted/captures").exists()},
         {"name": "backup vault", "ok": VAULT.exists()},

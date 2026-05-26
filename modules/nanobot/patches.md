@@ -80,3 +80,29 @@ Default placeholder carrier:
 After `/emoji_id <custom emoji>` is configured, Telegram renders the saved
 custom emoji over that carrier, so the visible placeholder is only the custom
 emoji.
+
+## Codex CLI Image Generation
+
+`patch_nanobot_codex_image_generation.py` adds a `codex_cli` provider to
+Nanobot's built-in `generate_image` tool.
+
+Why this exists:
+
+- Codex CLI has subscription-backed image generation through `$imagegen`.
+- Nanobot's upstream image tool expects API-key providers such as OpenRouter or
+  AIHubMix.
+- The harness bridges those two surfaces without exposing OpenAI API billing.
+
+Runtime behavior:
+
+- `tools.imageGeneration.provider = "codex_cli"`.
+- The tool invokes `codex exec` with `$imagegen`.
+- Codex writes the PNG under `CODEX_HOME/generated_images`.
+- The patch converts the PNG into Nanobot's artifact format.
+- Telegram receives the final image through Nanobot's normal media pipeline.
+
+Requirements:
+
+- `codex` CLI must be installed and logged in on the same macOS user account.
+- The runtime must have access to `CODEX_HOME`.
+- This uses Codex/ChatGPT subscription usage limits, not OpenAI API billing.
