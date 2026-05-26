@@ -106,3 +106,22 @@ Requirements:
 - `codex` CLI must be installed and logged in on the same macOS user account.
 - The runtime must have access to `CODEX_HOME`.
 - This uses Codex/ChatGPT subscription usage limits, not OpenAI API billing.
+
+## Streamed Media Delivery
+
+`patch_nanobot_streamed_media_delivery.py` fixes a delivery bug in streamed
+Telegram turns.
+
+Why this exists:
+
+- Nanobot streams text through `_stream_delta` / `_stream_end`.
+- Generated images are attached only to the final outbound message.
+- Upstream `ChannelManager` skips final `_streamed` messages to avoid duplicate
+  text, which also drops the attached image.
+
+Runtime behavior:
+
+- If a final `_streamed` outbound contains media, the patch sends a media-only
+  Telegram message.
+- The already-streamed text is not duplicated.
+- This keeps immediate feedback/streaming and still delivers generated images.

@@ -302,7 +302,7 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
 
 def apply_nanobot_patches(python: Path) -> None:
     patch_dir = repo_root() / "modules/nanobot/patches"
-    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py", "patch_nanobot_codex_errors.py", "patch_nanobot_custom_emoji.py", "patch_nanobot_codex_image_generation.py"]:
+    for script in ["patch_nanobot_effort.py", "patch_nanobot_guest.py", "patch_nanobot_quote.py", "patch_nanobot_chat_hardening.py", "patch_nanobot_codex_errors.py", "patch_nanobot_custom_emoji.py", "patch_nanobot_codex_image_generation.py", "patch_nanobot_streamed_media_delivery.py"]:
         run([str(python), str(patch_dir / script)])
 
 
@@ -347,6 +347,9 @@ def verify_nanobot_patches() -> list[str]:
     image_files = list(target.glob("python*/site-packages/nanobot/agent/tools/image_generation.py"))
     if not image_files or "_CodexCLIImageGenerationClient" not in image_files[0].read_text(encoding="utf-8"):
         failures.append("Nanobot Codex CLI image generation patch marker missing")
+    manager_files = list(target.glob("python*/site-packages/nanobot/channels/manager.py"))
+    if not manager_files or "_useful_agent_send_streamed_media_only" not in manager_files[0].read_text(encoding="utf-8"):
+        failures.append("Nanobot streamed media delivery patch marker missing")
     if not command_exists("codex"):
         failures.append("Codex CLI missing. Install/login to Codex before enabling subscription image generation.")
     return failures
