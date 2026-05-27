@@ -34,7 +34,7 @@ def safe_file(folder: Path, name: str) -> Path:
 
 def read_text(path: Path, limit: int = 16000) -> str:
     text = path.read_text(encoding="utf-8", errors="replace")
-    return text if len(text) <= limit else text[:limit] + "\n\n[truncated]"
+    return text if len(text) <= limit else text[:limit]
 
 
 def snippet(text: str, query: str, width: int = 420) -> str:

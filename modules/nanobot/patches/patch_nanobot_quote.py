@@ -36,7 +36,8 @@ HELPER = '''    @staticmethod
             text = getattr(quote, "text", None)
         if not text:
             return None
-        return text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + ("..." if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN else "")
+        text = re.sub(r"\s*\[truncated\]\s*", " ", text).strip()
+        return text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN]
 
 '''
 
@@ -87,7 +88,8 @@ def patch() -> None:
     text = text.replace(
         "        reply_text = reply.get(\"text\") or reply.get(\"caption\") or \"\"\n",
         "        quote = raw.get(\"quote\") or {}\n"
-        "        reply_text = quote.get(\"text\") or reply.get(\"text\") or reply.get(\"caption\") or \"\"\n",
+        "        reply_text = quote.get(\"text\") or reply.get(\"text\") or reply.get(\"caption\") or \"\"\n"
+        "        reply_text = re.sub(r\"\\s*\\[truncated\\]\\s*\", \" \", reply_text).strip()\n",
         1,
     )
     text = text.replace(

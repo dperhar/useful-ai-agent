@@ -80,10 +80,68 @@ HELPERS = r'''
         reply = raw.get("reply_to_message") or {}
         reply_text = reply.get("text") or reply.get("caption") or ""
         if reply_text:
+            reply_text = re.sub(r"\s*\[truncated\]\s*", " ", reply_text).strip()
+            reply_text = reply_text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN].rstrip()
             reply_from = reply.get("from") or {}
             label = reply_from.get("username") or reply_from.get("first_name") or "message"
-            text = f"[Guest reply to {label}: {reply_text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN]}]\n{text}".strip()
+            text = f"[Guest reply to {label}: {reply_text}]\n{text}".strip()
         return text.strip() or "[empty guest message]"
+
+    @staticmethod
+    def _useful_agent_guest_visible_body(text: str) -> str:
+        body = text if text and text != "[empty message]" else "[empty response]"
+        body = _strip_md_block(body)
+        body = re.sub(r"\s*\[truncated\]\s*", " ", body).strip()
+        return body or "[empty response]"
+
+    @staticmethod
+    def _useful_agent_guest_text_chunks(text: str) -> list[str]:
+        return split_message(TelegramChannel._useful_agent_guest_visible_body(text), TELEGRAM_MAX_MESSAGE_LEN) or ["[empty response]"]
+
+    async def _useful_agent_send_guest_followup_chunks(self, msg: OutboundMessage, chunks: list[str]) -> None:
+        if len(chunks) <= 1:
+            return
+        targets: list[tuple[str, int, bool]] = []
+        guest_chat_id = msg.metadata.get("guest_caller_chat_id")
+        if guest_chat_id is not None:
+            with suppress(Exception):
+                targets.append(("guest_caller_chat", int(guest_chat_id), True))
+        user_id = msg.metadata.get("user_id")
+        if user_id is not None and str(user_id) != str(guest_chat_id):
+            with suppress(Exception):
+                targets.append(("caller_private_chat", int(user_id), False))
+        for target_name, target_id, reply_in_target in targets:
+            try:
+                reply_params = None
+                if reply_in_target and msg.metadata.get("message_id"):
+                    reply_params = ReplyParameters(
+                        message_id=int(msg.metadata["message_id"]),
+                        allow_sending_without_reply=True,
+                    )
+                for i, chunk in enumerate(chunks[1:]):
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=target_id,
+                        text=chunk,
+                        reply_parameters=reply_params if i == 0 else None,
+                    )
+                self.logger.info("sent {} guest continuation chunk(s) via {}", len(chunks) - 1, target_name)
+                return
+            except Exception as e:
+                self.logger.warning("guest continuation via {} failed: {}", target_name, e)
+        self.logger.error(
+            "guest response has {} continuation chunk(s), but Telegram did not allow follow-up delivery",
+            len(chunks) - 1,
+        )
+
+    async def _useful_agent_send_guest_final(self, msg: OutboundMessage) -> None:
+        chunks = self._useful_agent_guest_text_chunks(msg.content)
+        inline_message_id = msg.metadata.get("guest_inline_message_id")
+        if inline_message_id:
+            await self._useful_agent_edit_guest_inline_message(str(inline_message_id), chunks[0])
+        elif msg.metadata.get("guest_query_id"):
+            await self._useful_agent_answer_guest_query(str(msg.metadata["guest_query_id"]), chunks[0])
+        await self._useful_agent_send_guest_followup_chunks(msg, chunks)
 
     @staticmethod
     def _useful_agent_guest_metadata(raw: dict, caller: dict, guest_query_id: str) -> dict:
@@ -103,9 +161,7 @@ HELPERS = r'''
     async def _useful_agent_answer_guest_query(self, guest_query_id: str, text: str) -> str | None:
         import httpx
 
-        body = text if text and text != "[empty message]" else "[empty response]"
-        if len(body) > TELEGRAM_MAX_MESSAGE_LEN:
-            body = body[: TELEGRAM_MAX_MESSAGE_LEN - 20].rstrip() + "\n\n[truncated]"
+        body = self._useful_agent_guest_text_chunks(text)[0]
         payload = {
             "guest_query_id": guest_query_id,
             "result": {
@@ -128,9 +184,7 @@ HELPERS = r'''
     async def _useful_agent_edit_guest_inline_message(self, inline_message_id: str, text: str) -> None:
         import httpx
 
-        body = _strip_md_block(text or "[empty response]")
-        if len(body) > TELEGRAM_MAX_MESSAGE_LEN:
-            body = body[: TELEGRAM_MAX_MESSAGE_LEN - 20].rstrip() + "\n\n[truncated]"
+        body = self._useful_agent_guest_text_chunks(text or "[empty response]")[0]
         payload = {"inline_message_id": inline_message_id, "text": body}
         url = f"https://api.telegram.org/bot{self.config.token}/editMessageText"
         async with httpx.AsyncClient(timeout=30.0, proxy=self.config.proxy or None) as client:
@@ -181,12 +235,12 @@ def patch() -> None:
         "        if msg.metadata.get(\"guest_inline_message_id\"):\n"
         "            if not (msg.content or \"\").strip() or msg.metadata.get(\"_progress\", False):\n"
         "                return\n"
-        "            await self._useful_agent_edit_guest_inline_message(str(msg.metadata[\"guest_inline_message_id\"]), msg.content)\n"
+        "            await self._useful_agent_send_guest_final(msg)\n"
         "            return\n\n"
         "        if msg.metadata.get(\"guest_query_id\"):\n"
         "            if not (msg.content or \"\").strip() or msg.metadata.get(\"_progress\", False):\n"
         "                return\n"
-        "            await self._useful_agent_answer_guest_query(str(msg.metadata[\"guest_query_id\"]), msg.content)\n"
+        "            await self._useful_agent_send_guest_final(msg)\n"
         "            return\n\n"
         "        # Only stop typing indicator and remove reaction for final responses\n",
         1,
