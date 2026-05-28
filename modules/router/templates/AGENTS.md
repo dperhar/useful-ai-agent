@@ -40,7 +40,11 @@ Examples:
 ## Memory Protocol
 
 - Before answering from past context, read routed source files or query local memory.
-- Store durable new facts in local memory and propose a routed `.md` reconciliation.
+- When the user asks to save, remember, записать, зафиксировать, update context, or otherwise persist information, write both layers:
+  - local memory for retrieval;
+  - the best routed source-of-truth `.md` file using the routing table.
+- If the destination is obvious, append directly with a timestamp and concise context. If it is ambiguous, write to `Inbox/` and say which source file should be reconciled later.
+- Do not stop at local memory only when the user intent is persistence.
 - Use Transcripted meeting context read-only and cite date/title/filename when relevant.
 - Before compaction, summarize durable facts and update routed files or memory.
 

@@ -11,7 +11,9 @@ This is the installation script for the human's AI agent.
 
 ## Phase 2: Bootstrap
 
-Run the README bootstrap after showing it to the user:
+Ask the user which project folder should become the agent workspace. The runtime
+must be installed inside that project folder, not in a disconnected home-folder
+workspace. Then run the README bootstrap after showing it to the user:
 
 ```zsh
 curl -fsSL https://raw.githubusercontent.com/dperhar/useful-ai-agent/main/bootstrap/macos.sh -o /tmp/useful-agent-bootstrap.sh
@@ -23,6 +25,7 @@ zsh /tmp/useful-agent-bootstrap.sh
 
 Guide the user through:
 
+- Choosing the project root and confirming the runtime folder.
 - BotFather bot creation and token paste.
 - Transcripted official install and permissions.
 - AI app login.

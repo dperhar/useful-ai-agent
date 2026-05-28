@@ -1,6 +1,7 @@
 # Uninstall
 
-This intentionally does not delete your workspace or backups automatically.
+This intentionally does not delete your project, runtime folder, or backups
+automatically.
 
 ```zsh
 launchctl bootout "gui/$(id -u)/com.usefulaiagent.nanobot" 2>/dev/null || true
@@ -10,7 +11,7 @@ uv tool uninstall useful-agent 2>/dev/null || true
 
 Manual review before deletion:
 
-- `~/Useful AI Agent Workspace`
+- `<project-root>/Useful Agent` or `<project-root>/Harness/useful-agent-runtime`
 - `~/Library/Application Support/UsefulAIAgent`
 - `~/Library/Logs/UsefulAIAgent`
 - encrypted backup mirrors in iCloud

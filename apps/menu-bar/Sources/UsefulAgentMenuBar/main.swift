@@ -32,6 +32,8 @@ final class UsefulAgentApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Open Backup Folder", #selector(openBackupFolder)))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(item("Show Local Health", #selector(openConsole)))
+        menu.addItem(item("Open Project Folder", #selector(openProjectFolder)))
+        menu.addItem(item("Open Useful Agent Runtime", #selector(openRuntimeFolder)))
         menu.addItem(item("Open Telegram Setup", #selector(openTelegram)))
         menu.addItem(item("View Logs", #selector(logs)))
         menu.addItem(NSMenuItem.separator())
@@ -92,6 +94,8 @@ final class UsefulAgentApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func backup() { runAndAlert(["backup"]) }
     @objc private func logs() { runAndAlert(["logs"]) }
     @objc private func openConsole() { runAndAlert(["doctor"]) }
+    @objc private func openProjectFolder() { runAndAlert(["open-project"]) }
+    @objc private func openRuntimeFolder() { runAndAlert(["open-runtime"]) }
     @objc private func openTelegram() { runAndAlert(["open-telegram-setup"]) }
     @objc private func openBackupFolder() { runAndAlert(["backup", "open-folder"]) }
     @objc private func disableMirror() { runAndAlert(["backup", "mirror", "disable"]) }

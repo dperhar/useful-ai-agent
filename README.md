@@ -33,6 +33,9 @@ After install, run useful-agent check and fix anything red.
   mirror when available, and menu/CLI restore into a safe separate folder.
 - Health checks and redacted reports.
 - Native macOS menu-bar controller source for start/check/backup/update/logs.
+- Project-local runtime: the installer asks for the main project folder and
+  creates the Useful Agent runtime inside it instead of using a disconnected
+  home-folder workspace.
 
 See [docs/harness-map.md](docs/harness-map.md) for the full entity map.
 
@@ -76,6 +79,7 @@ Common commands:
 ```zsh
 useful-agent check
 useful-agent doctor --json
+useful-agent configure project --guided
 useful-agent configure telegram --guided
 useful-agent configure websocket
 useful-agent menu install
@@ -89,7 +93,26 @@ useful-agent update
 ```
 
 Restore is safe-by-default: it creates a separate restore folder and never
-overwrites the active workspace.
+overwrites the active project.
+
+## Workspace Model
+
+Useful Agent separates four things:
+
+- Project root: your real files and source-of-truth markdown.
+- Runtime install root: a project-local `Useful Agent` folder, or
+  `Harness/useful-agent-runtime` when the project already has a `Harness/`.
+- Scratch workspace: agent runtime notes and control files inside the runtime.
+- Backup vault: encrypted artifacts outside the project, with optional iCloud
+  or custom-folder mirror.
+
+Nanobot must work on the project root directly. It must not duplicate the
+project into its own workspace.
+
+When the user asks to save/remember/record context, the bot writes both:
+
+- local memory for retrieval;
+- the routed source-of-truth `.md` file, append-only.
 
 ## Official Sources
 

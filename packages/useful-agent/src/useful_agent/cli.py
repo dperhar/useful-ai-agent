@@ -11,14 +11,10 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 APP_SUPPORT = Path(os.environ.get("USEFUL_AGENT_APP_SUPPORT", Path.home() / "Library/Application Support/UsefulAIAgent"))
-LOG_DIR = Path(os.environ.get("USEFUL_AGENT_LOG_DIR", Path.home() / "Library/Logs/UsefulAIAgent"))
-WORKSPACE = Path(os.environ.get("USEFUL_AGENT_WORKSPACE", Path.home() / "Useful AI Agent Workspace"))
-VAULT = APP_SUPPORT / "backups"
-RUNTIME = APP_SUPPORT / "runtime"
-RESTORES = APP_SUPPORT / "restores"
 CONFIG_FILE = APP_SUPPORT / "config.json"
 LAUNCH_AGENTS = Path.home() / "Library/LaunchAgents"
 REPO_DIR = APP_SUPPORT / "source/useful-ai-agent"
@@ -27,6 +23,15 @@ ACCOUNT = "bundle-password"
 TELEGRAM_SERVICE = "UsefulAIAgentTelegram"
 WEBSOCKET_SERVICE = "UsefulAIAgentWebSocket"
 BACKUP_BRANCH = "backup-snapshot"
+
+PROJECT_ROOT = Path(os.environ.get("USEFUL_AGENT_PROJECT_ROOT", Path.cwd())).expanduser()
+INSTALL_ROOT = Path(os.environ.get("USEFUL_AGENT_INSTALL_ROOT", PROJECT_ROOT / "Useful Agent")).expanduser()
+WORKSPACE = Path(os.environ.get("USEFUL_AGENT_WORKSPACE", INSTALL_ROOT / "workspace")).expanduser()
+STATE_DIR = INSTALL_ROOT / "state"
+RUNTIME = INSTALL_ROOT / "runtime"
+VAULT = APP_SUPPORT / "backups" / "default"
+RESTORES = APP_SUPPORT / "restores" / "default"
+LOG_DIR = Path(os.environ.get("USEFUL_AGENT_LOG_DIR", Path.home() / "Library/Logs/UsefulAIAgent/default"))
 
 
 def run(cmd: list[str], *, check: bool = True, capture: bool = False, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -54,7 +59,7 @@ def repo_root() -> Path:
 
 
 def ensure_dirs() -> None:
-    for path in [APP_SUPPORT, LOG_DIR, WORKSPACE, VAULT, RUNTIME, RESTORES, LAUNCH_AGENTS, APP_SUPPORT / "bin"]:
+    for path in [APP_SUPPORT, LOG_DIR, INSTALL_ROOT, WORKSPACE, STATE_DIR, VAULT, RUNTIME, RESTORES, LAUNCH_AGENTS, APP_SUPPORT / "bin"]:
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -84,9 +89,34 @@ def default_mirror_path() -> Path | None:
     return None
 
 
+def slug_path(path: Path) -> str:
+    slug = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in str(path.expanduser()))
+    slug = "-".join(part for part in slug.split("-") if part)
+    return slug[-80:] or "default"
+
+
+def default_install_root(project_root: Path) -> Path:
+    if (project_root / "Harness").exists():
+        return project_root / "Harness/useful-agent-runtime"
+    return project_root / "Useful Agent"
+
+
+def default_workspace_for(install_root: Path) -> Path:
+    return install_root / "workspace"
+
+
 def default_config() -> dict:
     mirror = default_mirror_path()
+    project_root_raw = os.environ.get("USEFUL_AGENT_PROJECT_ROOT", "")
+    project_root = Path(project_root_raw).expanduser() if project_root_raw else None
+    install_root_raw = os.environ.get("USEFUL_AGENT_INSTALL_ROOT", "")
+    install_root = Path(install_root_raw).expanduser() if install_root_raw else (default_install_root(project_root) if project_root else None)
     return {
+        "project": {
+            "root": str(project_root) if project_root else "",
+            "install_root": str(install_root) if install_root else "",
+            "workspace": str(default_workspace_for(install_root)) if install_root else "",
+        },
         "backup": {
             "mirror_enabled": mirror is not None,
             "mirror_path": str(mirror) if mirror else "",
@@ -101,6 +131,7 @@ def load_config() -> dict:
             loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 config.update(loaded)
+                config["project"] = {**default_config()["project"], **loaded.get("project", {})}
                 config["backup"] = {**default_config()["backup"], **loaded.get("backup", {})}
         except json.JSONDecodeError:
             pass
@@ -111,10 +142,64 @@ def save_config(config: dict) -> None:
     write(CONFIG_FILE, json.dumps(config, indent=2) + "\n", 0o600)
 
 
+def apply_config_paths(config: dict) -> None:
+    global PROJECT_ROOT, INSTALL_ROOT, WORKSPACE, STATE_DIR, RUNTIME, VAULT, RESTORES, LOG_DIR
+
+    project = config.get("project", {})
+    root_raw = project.get("root") or os.environ.get("USEFUL_AGENT_PROJECT_ROOT") or str(Path.cwd())
+    PROJECT_ROOT = Path(str(root_raw)).expanduser().resolve()
+    install_raw = project.get("install_root") or os.environ.get("USEFUL_AGENT_INSTALL_ROOT") or str(default_install_root(PROJECT_ROOT))
+    INSTALL_ROOT = Path(str(install_raw)).expanduser()
+    workspace_raw = project.get("workspace") or os.environ.get("USEFUL_AGENT_WORKSPACE") or str(default_workspace_for(INSTALL_ROOT))
+    WORKSPACE = Path(str(workspace_raw)).expanduser()
+    STATE_DIR = INSTALL_ROOT / "state"
+    RUNTIME = INSTALL_ROOT / "runtime"
+
+    profile = slug_path(PROJECT_ROOT)
+    VAULT = APP_SUPPORT / "backups" / profile
+    RESTORES = APP_SUPPORT / "restores" / profile
+    LOG_DIR = Path(os.environ.get("USEFUL_AGENT_LOG_DIR", Path.home() / f"Library/Logs/UsefulAIAgent/{profile}"))
+
+
 def ensure_config() -> dict:
+    APP_SUPPORT.mkdir(parents=True, exist_ok=True)
     config = load_config()
     if not CONFIG_FILE.exists():
         save_config(config)
+    apply_config_paths(config)
+    return config
+
+
+def configure_project(args: argparse.Namespace) -> dict:
+    APP_SUPPORT.mkdir(parents=True, exist_ok=True)
+    config = load_config()
+    project_root = Path(args.project_root).expanduser() if getattr(args, "project_root", None) else None
+    if project_root is None and getattr(args, "guided", False):
+        default_root = Path.cwd()
+        entered = input(f"Project root folder [{default_root}]: ").strip()
+        project_root = Path(entered).expanduser() if entered else default_root
+    if project_root is None:
+        project_root = Path(config.get("project", {}).get("root") or Path.cwd()).expanduser()
+    project_root = project_root.resolve()
+
+    install_root = Path(args.install_root).expanduser() if getattr(args, "install_root", None) else None
+    if install_root is None:
+        existing = config.get("project", {}).get("install_root")
+        default_install = Path(existing).expanduser() if existing else default_install_root(project_root)
+        if getattr(args, "guided", False):
+            entered = input(f"Useful Agent runtime folder [{default_install}]: ").strip()
+            install_root = Path(entered).expanduser() if entered else default_install
+        else:
+            install_root = default_install
+
+    workspace = default_workspace_for(install_root)
+    config["project"] = {
+        "root": str(project_root),
+        "install_root": str(install_root),
+        "workspace": str(workspace),
+    }
+    save_config(config)
+    apply_config_paths(config)
     return config
 
 
@@ -179,6 +264,7 @@ def parse_allowed_users(raw: str | None) -> list[int | str]:
 
 
 def install_guided(args: argparse.Namespace) -> None:
+    configure_project(args)
     ensure_dirs()
     ensure_config()
     write(APP_SUPPORT / "source-dir", str(repo_root()) + "\n", 0o644)
@@ -194,6 +280,8 @@ def install_guided(args: argparse.Namespace) -> None:
 
     print("1/8 preflight ok")
     install_workspace()
+    install_project_adapters(PROJECT_ROOT)
+    install_backup_policy()
 
     print("2/8 installing Python runtime packages")
     run([uv, "venv", str(RUNTIME / "venv")])
@@ -249,7 +337,7 @@ def install_guided(args: argparse.Namespace) -> None:
 
 
 def install_workspace() -> None:
-    print("Creating router-first workspace")
+    print("Creating project-local runtime workspace")
     replacements = {"WORKSPACE": str(WORKSPACE)}
     copy_template("modules/router/templates/AGENTS.md", WORKSPACE / "AGENTS.md", replacements)
     copy_template("modules/router/templates/CLAUDE.md", WORKSPACE / "CLAUDE.md", replacements)
@@ -257,6 +345,108 @@ def install_workspace() -> None:
     for folder in ["Canon", "Projects", "Clients", "Personal", "Inbox", "Archive", "Harness"]:
         (WORKSPACE / folder).mkdir(parents=True, exist_ok=True)
     copy_template("modules/router/templates/scoped-harness-AGENTS.md", WORKSPACE / "Harness/AGENTS.md", replacements)
+    install_source_save_policy()
+
+
+def install_source_save_policy() -> None:
+    write(WORKSPACE / "Harness/source-save-policy.md", f"""# Source Save Policy
+
+Project root: `{PROJECT_ROOT}`
+
+When the user asks to persist information, the agent must update source of
+truth files, not only local memory.
+
+## Save Flow
+
+1. Identify whether the request is a persistence request. Trigger words include:
+   save, remember, record, write down, log, зафиксируй, запиши, сохрани, добавь в контекст.
+2. Choose the destination using the nearest `AGENTS.md` routing table.
+3. Append to an existing `.md` file whenever possible.
+4. If no destination is obvious, append to `Inbox/` and mention the unresolved routing.
+5. Also write the compact durable fact to local memory for retrieval.
+6. Never silently save only to local memory when the user asked for persistence.
+
+## Append Format
+
+Use a timestamped append block:
+
+```md
+### YYYY-MM-DD HH:MM - Short title
+
+Source: Telegram / local agent / meeting / manual note.
+
+- Durable fact:
+- Context:
+- Follow-up:
+```
+
+Keep the original file history intact unless the user explicitly asks for a rewrite.
+""")
+
+
+def copy_template_if_absent(name: str, target: Path, replacements: dict[str, str] | None = None, mode: int | None = None) -> bool:
+    if target.exists():
+        return False
+    copy_template(name, target, replacements, mode)
+    return True
+
+
+def install_project_adapters(target: Path) -> None:
+    replacements = {"WORKSPACE": str(target)}
+    copy_template_if_absent("modules/router/templates/AGENTS.md", target / "AGENTS.md", replacements)
+    copy_template_if_absent("modules/router/templates/CLAUDE.md", target / "CLAUDE.md", replacements)
+    copy_template_if_absent("modules/router/templates/cursor-router.mdc", target / ".cursor/rules/useful-agent-router.mdc", replacements)
+
+
+def backup_config_dir() -> Path:
+    return INSTALL_ROOT / "config/backups"
+
+
+def backup_excludes_file() -> Path:
+    return backup_config_dir() / "backup-excludes.txt"
+
+
+def backup_nested_policy_file() -> Path:
+    return backup_config_dir() / "backup-nested-repos.txt"
+
+
+def install_backup_policy() -> None:
+    excludes = backup_excludes_file()
+    nested = backup_nested_policy_file()
+    if not excludes.exists():
+        write(excludes, """# Useful Agent backup-only excludes.
+# This is not .gitignore. It only prevents local runtime/build/model junk from
+# making encrypted backups too large.
+Useful Agent/runtime/
+Useful Agent/state/cache/
+Harness/useful-agent-runtime/runtime/
+Harness/useful-agent-runtime/state/cache/
+.git/
+.DS_Store
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+target/
+dist/
+build/
+*.gguf
+*.safetensors
+*.onnx
+*.dylib
+*.so
+*.a
+*.o
+*.tmp
+*.log
+""")
+    if not nested.exists():
+        write(nested, """# action|relative/path|reason
+# action: snapshot or skip. Empty file means auto-snapshot discovered nested repos.
+""")
 
 
 def install_skills() -> None:
@@ -298,7 +488,26 @@ def collect_telegram(args: argparse.Namespace) -> tuple[str | None, list[int | s
 def build_nanobot_config(token: str | None, allowed_users: list[int | str], websocket_secret: str) -> dict:
     telegram_enabled = bool(token and allowed_users)
     return {
-        "agents": {"defaults": {"workspace": str(WORKSPACE), "reasoningEffort": "medium"}},
+        "agents": {
+            "defaults": {
+                "workspace": str(WORKSPACE),
+                "projectRoot": str(PROJECT_ROOT),
+                "reasoningEffort": "medium",
+            }
+        },
+        "workspace": {
+            "projectRoot": str(PROJECT_ROOT),
+            "installRoot": str(INSTALL_ROOT),
+            "scratch": str(WORKSPACE),
+            "mode": "project-local-no-source-duplication",
+        },
+        "sourceOfTruth": {
+            "enabled": True,
+            "projectRoot": str(PROJECT_ROOT),
+            "policyFile": str(WORKSPACE / "Harness/source-save-policy.md"),
+            "writeMode": "append-only-routed-markdown",
+            "memoryIsNotEnoughForPersistenceRequests": True,
+        },
         "channels": {
             "telegram": {
                 "enabled": telegram_enabled,
@@ -326,7 +535,7 @@ def build_nanobot_config(token: str | None, allowed_users: list[int | str], webs
             "mcpServers": {
                 "mempalace": {
                     "command": str(RUNTIME / "venv/bin/mempalace-mcp"),
-                    "args": ["--palace", str(APP_SUPPORT / "mempalace/palace")],
+                    "args": ["--palace", str(STATE_DIR / "mempalace/palace")],
                     "toolTimeout": 60,
                 },
                 "transcripted": {
@@ -408,6 +617,7 @@ def install_desktop_helpers() -> None:
 
 
 def doctor_status() -> list[dict[str, object]]:
+    apply_config_paths(load_config())
     config_path = APP_SUPPORT / "nanobot/config.json"
     config: dict = {}
     if config_path.exists():
@@ -430,6 +640,9 @@ def doctor_status() -> list[dict[str, object]]:
         {"name": "git", "ok": command_exists("git"), "status": "ok" if command_exists("git") else "manual_required"},
         {"name": "codex cli", "ok": command_exists("codex"), "status": "ok" if command_exists("codex") else "manual_required"},
         {"name": "workspace AGENTS.md", "ok": (WORKSPACE / "AGENTS.md").exists()},
+        {"name": "project root", "ok": PROJECT_ROOT.exists(), "path": str(PROJECT_ROOT)},
+        {"name": "project-local install root", "ok": str(INSTALL_ROOT).startswith(str(PROJECT_ROOT)), "path": str(INSTALL_ROOT)},
+        {"name": "source save policy", "ok": (WORKSPACE / "Harness/source-save-policy.md").exists()},
         {"name": "nanobot config", "ok": config_path.exists()},
         {"name": "nanobot launcher", "ok": (APP_SUPPORT / "bin/run-nanobot.sh").exists()},
         {"name": "nanobot console script", "ok": (RUNTIME / "venv/bin/nanobot").exists()},
@@ -459,6 +672,7 @@ def check(args: argparse.Namespace) -> None:
 
 
 def configure_telegram(args: argparse.Namespace) -> None:
+    ensure_config()
     ensure_dirs()
     token, allowed_users = collect_telegram(args)
     config_path = APP_SUPPORT / "nanobot/config.json"
@@ -469,6 +683,7 @@ def configure_telegram(args: argparse.Namespace) -> None:
 
 
 def configure_websocket(_: argparse.Namespace) -> None:
+    ensure_config()
     ensure_dirs()
     secret = get_or_create_secret(WEBSOCKET_SERVICE, "token-issue-secret", "websocket-token-issue-secret")
     config_path = APP_SUPPORT / "nanobot/config.json"
@@ -486,7 +701,8 @@ def configure_websocket(_: argparse.Namespace) -> None:
 
 
 def configure_adapters(args: argparse.Namespace) -> None:
-    target = Path(args.target).expanduser().resolve()
+    ensure_config()
+    target = Path(args.target).expanduser().resolve() if args.target else PROJECT_ROOT
     target.mkdir(parents=True, exist_ok=True)
     replacements = {"WORKSPACE": str(target)}
     copy_template("modules/router/templates/AGENTS.md", target / "AGENTS.md", replacements)
@@ -495,16 +711,26 @@ def configure_adapters(args: argparse.Namespace) -> None:
     print(f"Installed Codex/Claude/Cursor workspace adapters in {target}")
 
 
+def configure_project_cmd(args: argparse.Namespace) -> None:
+    config = configure_project(args)
+    ensure_dirs()
+    install_backup_policy()
+    print(json.dumps(config["project"], indent=2))
+
+
 def start(_: argparse.Namespace) -> None:
+    ensure_config()
     run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(LAUNCH_AGENTS / "com.usefulaiagent.nanobot.plist")], check=False)
     run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.usefulaiagent.nanobot"], check=False)
 
 
 def stop(_: argparse.Namespace) -> None:
+    ensure_config()
     run(["launchctl", "bootout", f"gui/{os.getuid()}/com.usefulaiagent.nanobot"], check=False)
 
 
 def logs(_: argparse.Namespace) -> None:
+    ensure_config()
     for path in sorted(LOG_DIR.glob("*.log"))[-5:]:
         print(f"== {path} ==")
         print(path.read_text(errors="replace")[-4000:])
@@ -537,7 +763,7 @@ def openssl_decrypt(input_path: Path, output_path: Path, password: str) -> None:
     ], input_text=password)
 
 
-def copy_backup_to_mirror(artifact: Path, manifest: Path, config: dict) -> dict:
+def copy_backup_to_mirror(artifact: Path, manifest: Path, config: dict, latest_manifest_name: str = "project-latest.manifest.json") -> dict:
     backup_config = config.get("backup", {})
     enabled = bool(backup_config.get("mirror_enabled"))
     mirror_path = Path(str(backup_config.get("mirror_path") or "")).expanduser() if backup_config.get("mirror_path") else None
@@ -555,78 +781,201 @@ def copy_backup_to_mirror(artifact: Path, manifest: Path, config: dict) -> dict:
         if os.environ.get("USEFUL_AGENT_SKIP_IMMUTABLE") != "1":
             run(["chflags", "uchg", str(mirror_artifact)], check=False)
         shutil.copy2(manifest, mirror_path / manifest.name)
-        shutil.copy2(manifest, mirror_path / "workspace-latest.manifest.json")
+        shutil.copy2(manifest, mirror_path / latest_manifest_name)
         result["copied"] = True
     except Exception as exc:
         result["error"] = str(exc)
     return result
 
 
+def git_snapshot_bundle(source_dir: Path, snapshot_git: Path, bundle_path: Path, label: str, excludes: list[str] | None = None) -> str:
+    run(["git", f"--git-dir={snapshot_git}", "init", "-q"])
+    run(["git", f"--git-dir={snapshot_git}", "config", "user.name", "Useful AI Agent Backup"])
+    run(["git", f"--git-dir={snapshot_git}", "config", "user.email", "useful-agent-backup@local"])
+    run(["git", f"--git-dir={snapshot_git}", "config", "core.autocrlf", "false"])
+    run(["git", f"--git-dir={snapshot_git}", "config", "advice.detachedHead", "false"])
+    if excludes:
+        info = snapshot_git / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        (info / "exclude").write_text("\n".join(excludes) + "\n", encoding="utf-8")
+    run(["git", f"--git-dir={snapshot_git}", f"--work-tree={source_dir}", "add", "-A", "--", "."])
+    tree = run(["git", f"--git-dir={snapshot_git}", "write-tree"], capture=True).stdout.strip()
+    commit = run(["git", f"--git-dir={snapshot_git}", "commit-tree", tree], input_text=f"{label} working-tree snapshot\n", capture=True).stdout.strip()
+    run(["git", f"--git-dir={snapshot_git}", "update-ref", "refs/heads/snapshot", commit])
+    run(["git", f"--git-dir={snapshot_git}", "fsck", "--no-progress"])
+    run(["git", f"--git-dir={snapshot_git}", "bundle", "create", str(bundle_path), "refs/heads/snapshot"])
+    run(["git", "bundle", "verify", str(bundle_path)])
+    return run(["git", f"--git-dir={snapshot_git}", "rev-parse", "--short", commit], capture=True).stdout.strip()
+
+
+def read_backup_excludes(source_dir: Path) -> list[str]:
+    install_backup_policy()
+    excludes: list[str] = []
+    if backup_excludes_file().exists():
+        for line in backup_excludes_file().read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                excludes.append(stripped)
+    return excludes
+
+
+def discover_nested_repos(source_dir: Path) -> list[Path]:
+    nested: list[Path] = []
+    for git_dir in source_dir.rglob(".git"):
+        if git_dir == source_dir / ".git":
+            continue
+        if any(part in {".Trash", "node_modules", "runtime", ".venv", "venv"} for part in git_dir.parts):
+            continue
+        if git_dir.is_dir():
+            nested.append(git_dir.parent)
+    return sorted(nested)
+
+
+def read_nested_policy(source_dir: Path) -> dict[str, tuple[str, str]]:
+    install_backup_policy()
+    policy: dict[str, tuple[str, str]] = {}
+    path = backup_nested_policy_file()
+    if not path.exists():
+        return policy
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split("|", 2)
+        if len(parts) < 2:
+            continue
+        action = parts[0].strip()
+        rel = parts[1].strip().rstrip("/")
+        reason = parts[2].strip() if len(parts) > 2 else ""
+        if action in {"snapshot", "skip"} and rel:
+            policy[rel] = (action, reason)
+    return policy
+
+
+def artifact_from_manifest(data: dict[str, Any], manifest_path: Path | None = None) -> Path | None:
+    if manifest_path:
+        candidate = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".root.bundle.enc"))
+        if candidate.exists():
+            return candidate
+        candidate = manifest_path.with_name(manifest_path.name.replace(".manifest.json", ".bundle.enc"))
+        if candidate.exists():
+            return candidate
+    root = data.get("root") if isinstance(data.get("root"), dict) else None
+    raw = root.get("encrypted_bundle") if root else data.get("encrypted_bundle")
+    if raw:
+        candidate = Path(str(raw)).expanduser()
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def create_backup(_: argparse.Namespace) -> None:
-    ensure_dirs()
     config = ensure_config()
+    ensure_dirs()
     password = backup_password()
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     created_at = datetime.now().astimezone().isoformat(timespec="seconds")
     report = VAULT / f"backup-{ts}.report.txt"
     temp_root = Path(tempfile.mkdtemp(prefix="useful-agent-backup."))
     try:
-        bundle = temp_root / "workspace.bundle"
-        encrypted = temp_root / "workspace.bundle.enc"
-        verify_bundle = temp_root / "verify.bundle"
-        restore_smoke = temp_root / "restore"
+        source_dir = PROJECT_ROOT
+        bundle = temp_root / f"project-{ts}.root.bundle"
+        encrypted = temp_root / f"project-{ts}.root.bundle.enc"
+        verify_bundle = temp_root / f"project-{ts}.root.verify.bundle"
+        restore_smoke = temp_root / "root-restore-smoke"
 
-        if not (WORKSPACE / ".git").exists():
-            run(["git", "-C", str(WORKSPACE), "init"])
-        run(["git", "-C", str(WORKSPACE), "config", "user.name", "Useful AI Agent Backup"])
-        run(["git", "-C", str(WORKSPACE), "config", "user.email", "useful-agent-backup@local"])
-        run(["git", "-C", str(WORKSPACE), "add", "-A"])
-        has_head = run(["git", "-C", str(WORKSPACE), "rev-parse", "--verify", "HEAD"], check=False, capture=True).returncode == 0
-        staged_clean = run(["git", "-C", str(WORKSPACE), "diff", "--cached", "--quiet"], check=False).returncode == 0
-        if not has_head or not staged_clean:
-            run(["git", "-C", str(WORKSPACE), "commit", "--allow-empty", "-m", f"Useful Agent backup snapshot {ts}"])
+        if not source_dir.exists():
+            raise SystemExit(f"Project root does not exist: {source_dir}")
 
-        head = run(["git", "-C", str(WORKSPACE), "rev-parse", "--short", "HEAD"], capture=True).stdout.strip()
-        run(["git", "-C", str(WORKSPACE), "branch", "-f", BACKUP_BRANCH, "HEAD"])
-        run(["git", "-C", str(WORKSPACE), "bundle", "create", str(bundle), f"refs/heads/{BACKUP_BRANCH}"])
+        root_excludes = read_backup_excludes(source_dir)
+        nested_repos = discover_nested_repos(source_dir)
+        for nested_repo in nested_repos:
+            root_excludes.append(str(nested_repo.relative_to(source_dir)).rstrip("/") + "/")
+
+        snapshot_head = git_snapshot_bundle(source_dir, temp_root / "root-snapshot.git", bundle, str(source_dir), root_excludes)
         openssl_encrypt(bundle, encrypted, password)
         openssl_decrypt(encrypted, verify_bundle, password)
         run(["git", "bundle", "verify", str(verify_bundle)])
-        run(["git", "clone", "-q", "-b", BACKUP_BRANCH, str(verify_bundle), str(restore_smoke)])
+        run(["git", "clone", "-q", "-b", "snapshot", str(verify_bundle), str(restore_smoke)])
 
-        artifact = VAULT / f"workspace-{ts}.bundle.enc"
-        manifest = VAULT / f"workspace-{ts}.manifest.json"
+        nested_policy = read_nested_policy(source_dir)
+        nested_records: list[dict[str, Any]] = []
+        for nested_repo in nested_repos:
+            rel = str(nested_repo.relative_to(source_dir))
+            action, reason = nested_policy.get(rel, ("snapshot", "auto-discovered nested git repository"))
+            branch = run(["git", "-C", str(nested_repo), "branch", "--show-current"], check=False, capture=True).stdout.strip()
+            changed_raw = run(["git", "-C", str(nested_repo), "status", "--porcelain"], check=False, capture=True).stdout
+            changed_files = len([line for line in changed_raw.splitlines() if line.strip()])
+            record: dict[str, Any] = {
+                "action": action,
+                "path": rel,
+                "branch": branch or None,
+                "changed_files": changed_files,
+                "reason": reason,
+            }
+            if action == "snapshot":
+                slug = slug_path(Path(rel))
+                nested_bundle = temp_root / f"project-{ts}.nested-{slug}.bundle"
+                nested_enc = temp_root / f"project-{ts}.nested-{slug}.bundle.enc"
+                nested_verify = temp_root / f"project-{ts}.nested-{slug}.verify.bundle"
+                nested_head = git_snapshot_bundle(nested_repo, temp_root / f"nested-{slug}.git", nested_bundle, rel, read_backup_excludes(nested_repo))
+                openssl_encrypt(nested_bundle, nested_enc, password)
+                openssl_decrypt(nested_enc, nested_verify, password)
+                run(["git", "bundle", "verify", str(nested_verify)])
+                nested_final = VAULT / f"project-{ts}.nested-{slug}.bundle.enc"
+                shutil.copy2(nested_enc, nested_final)
+                nested_final.chmod(0o600)
+                if os.environ.get("USEFUL_AGENT_SKIP_IMMUTABLE") != "1":
+                    run(["chflags", "uchg", str(nested_final)], check=False)
+                record.update({"status": "ok", "encrypted_bundle": str(nested_final), "snapshot_head": nested_head})
+            else:
+                record.update({"status": "skipped", "encrypted_bundle": None, "snapshot_head": None})
+            nested_records.append(record)
+
+        artifact = VAULT / f"project-{ts}.root.bundle.enc"
+        manifest = VAULT / f"project-{ts}.manifest.json"
         shutil.copy2(encrypted, artifact)
         artifact.chmod(0o600)
         if os.environ.get("USEFUL_AGENT_SKIP_IMMUTABLE") != "1":
             run(["chflags", "uchg", str(artifact)], check=False)
-        shutil.copy2(artifact, VAULT / "workspace-latest.bundle.enc")
+        shutil.copy2(artifact, VAULT / "project-latest.root.bundle.enc")
 
         manifest_data = {
-            "schema": "useful-agent-backup/v1",
+            "schema": "useful-agent-backup-set/v2",
             "created_at": created_at,
+            "project_root": str(source_dir),
+            "install_root": str(INSTALL_ROOT),
             "workspace": str(WORKSPACE),
-            "source_head": head,
-            "encrypted_bundle": str(artifact),
-            "branch": BACKUP_BRANCH,
+            "root": {
+                "encrypted_bundle": str(artifact),
+                "snapshot_head": snapshot_head,
+                "branch": "snapshot",
+            },
+            "nested_repositories": nested_records,
+            "policy": {
+                "excludes": str(backup_excludes_file()),
+                "nested": str(backup_nested_policy_file()),
+            },
             "verification": {"decrypt": True, "bundle": True, "restore_clone": True},
             "mirror": {"enabled": bool(config.get("backup", {}).get("mirror_enabled")), "path": config.get("backup", {}).get("mirror_path", "")},
         }
         write(manifest, json.dumps(manifest_data, indent=2) + "\n", 0o600)
-        shutil.copy2(manifest, VAULT / "workspace-latest.manifest.json")
+        shutil.copy2(manifest, VAULT / "project-latest.manifest.json")
         mirror_result = copy_backup_to_mirror(artifact, manifest, config)
         manifest_data["mirror"] = mirror_result
         write(manifest, json.dumps(manifest_data, indent=2) + "\n", 0o600)
-        shutil.copy2(manifest, VAULT / "workspace-latest.manifest.json")
+        shutil.copy2(manifest, VAULT / "project-latest.manifest.json")
         if mirror_result.get("copied"):
             mirror_path = Path(str(mirror_result.get("path") or "")).expanduser()
             if mirror_path.exists():
                 shutil.copy2(manifest, mirror_path / manifest.name)
-                shutil.copy2(manifest, mirror_path / "workspace-latest.manifest.json")
+                shutil.copy2(manifest, mirror_path / "project-latest.manifest.json")
 
         report.write_text(
             f"Encrypted backup verified: {artifact}\n"
             f"Manifest: {manifest}\n"
+            f"Project root: {source_dir}\n"
+            f"Nested repositories: {len(nested_records)}\n"
             f"Mirror: {json.dumps(mirror_result, ensure_ascii=False)}\n",
             encoding="utf-8",
         )
@@ -640,7 +989,7 @@ def create_backup(_: argparse.Namespace) -> None:
 
 
 def backup_search_locations() -> list[Path]:
-    config = load_config()
+    config = ensure_config()
     locations: list[Path] = []
     backup_config = config.get("backup", {})
     if backup_config.get("mirror_enabled") and backup_config.get("mirror_path"):
@@ -655,16 +1004,16 @@ def discover_backups(limit: int = 5) -> list[dict[str, object]]:
     for location in backup_search_locations():
         if not location.exists():
             continue
-        for manifest in sorted(location.glob("workspace-*.manifest.json")):
-            if manifest.name == "workspace-latest.manifest.json":
+        for manifest in sorted([*location.glob("project-*.manifest.json"), *location.glob("workspace-*.manifest.json")]):
+            if manifest.name in {"workspace-latest.manifest.json", "project-latest.manifest.json"}:
                 continue
             try:
                 data = json.loads(manifest.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            declared_artifact = Path(str(data.get("encrypted_bundle") or ""))
-            sibling_artifact = manifest.with_name(manifest.name.replace(".manifest.json", ".bundle.enc"))
-            artifact = sibling_artifact if sibling_artifact.exists() else declared_artifact
+            artifact = artifact_from_manifest(data, manifest)
+            if artifact is None:
+                continue
             key = artifact.name if artifact.exists() else manifest.name
             if key in seen:
                 continue
@@ -675,10 +1024,13 @@ def discover_backups(limit: int = 5) -> list[dict[str, object]]:
                 "manifest": str(manifest),
                 "location": str(location),
                 "legacy": False,
+                "schema": data.get("schema") or "",
+                "project_root": data.get("project_root") or data.get("repo") or "",
                 "workspace": data.get("workspace") or "",
+                "nested_count": len(data.get("nested_repositories") or []),
             })
-        for artifact in sorted(location.glob("workspace-*.bundle.enc")):
-            if artifact.name == "workspace-latest.bundle.enc":
+        for artifact in sorted([*location.glob("project-*.root.bundle.enc"), *location.glob("workspace-*.bundle.enc")]):
+            if artifact.name in {"workspace-latest.bundle.enc", "project-latest.root.bundle.enc"}:
                 continue
             key = artifact.name
             if key in seen:
@@ -690,7 +1042,10 @@ def discover_backups(limit: int = 5) -> list[dict[str, object]]:
                 "manifest": "",
                 "location": str(location),
                 "legacy": True,
+                "schema": "legacy/root-only",
+                "project_root": "",
                 "workspace": "",
+                "nested_count": 0,
             })
     items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return items[:limit]
@@ -710,6 +1065,7 @@ def backup_list(args: argparse.Namespace) -> None:
 
 
 def restore_backup(args: argparse.Namespace) -> None:
+    ensure_config()
     ensure_dirs()
     if args.file:
         artifact = Path(args.file).expanduser()
@@ -734,19 +1090,19 @@ def restore_backup(args: argparse.Namespace) -> None:
         bundle = temp_root / "workspace.bundle"
         openssl_decrypt(artifact, bundle, password)
         run(["git", "bundle", "verify", str(bundle)])
-        result = run(["git", "clone", "-q", "-b", BACKUP_BRANCH, str(bundle), str(restore_dir)], check=False, capture=True)
+        result = run(["git", "clone", "-q", "-b", "snapshot", str(bundle), str(restore_dir)], check=False, capture=True)
         if result.returncode != 0:
             run(["git", "clone", "-q", str(bundle), str(restore_dir)])
         print(f"Restored backup to: {restore_dir}")
-        print("Safety: active workspace was not overwritten. Inspect the restore folder before replacing anything.")
+        print("Safety: active project was not overwritten. Inspect the restore folder before replacing anything.")
         run(["open", str(restore_dir)], check=False, capture=True)
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def backup_mirror(args: argparse.Namespace) -> None:
-    ensure_dirs()
     config = ensure_config()
+    ensure_dirs()
     config.setdefault("backup", {})
     if args.mirror_cmd == "enable":
         path = Path(args.path).expanduser()
@@ -768,6 +1124,7 @@ def backup_mirror(args: argparse.Namespace) -> None:
 
 
 def backup_open_folder(_: argparse.Namespace) -> None:
+    ensure_config()
     config = load_config()
     backup_config = config.get("backup", {})
     target = Path(str(backup_config.get("mirror_path") or "")).expanduser() if backup_config.get("mirror_enabled") and backup_config.get("mirror_path") else VAULT
@@ -798,7 +1155,19 @@ def open_telegram(_: argparse.Namespace) -> None:
     run(["open", "tg://resolve?domain=BotFather"], check=False)
 
 
+def open_project(_: argparse.Namespace) -> None:
+    run(["open", str(PROJECT_ROOT)], check=False)
+    print(f"Opened project root: {PROJECT_ROOT}")
+
+
+def open_runtime(_: argparse.Namespace) -> None:
+    INSTALL_ROOT.mkdir(parents=True, exist_ok=True)
+    run(["open", str(INSTALL_ROOT)], check=False)
+    print(f"Opened Useful Agent runtime: {INSTALL_ROOT}")
+
+
 def menu_install(_: argparse.Namespace) -> None:
+    ensure_config()
     ensure_dirs()
     app_dir = Path.home() / "Applications/Useful Agent.app"
     macos = app_dir / "Contents/MacOS"
@@ -829,6 +1198,8 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("install")
     p.add_argument("--guided", action="store_true")
+    p.add_argument("--project-root")
+    p.add_argument("--install-root")
     p.add_argument("--telegram-token")
     p.add_argument("--allow-user")
     p.set_defaults(func=install_guided)
@@ -840,6 +1211,11 @@ def main(argv: list[str] | None = None) -> None:
 
     configure = sub.add_parser("configure")
     configure_sub = configure.add_subparsers(dest="configure_cmd", required=True)
+    p = configure_sub.add_parser("project")
+    p.add_argument("--project-root")
+    p.add_argument("--install-root")
+    p.add_argument("--guided", action="store_true")
+    p.set_defaults(func=configure_project_cmd)
     p = configure_sub.add_parser("telegram")
     p.add_argument("--guided", action="store_true")
     p.add_argument("--telegram-token")
@@ -847,7 +1223,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=configure_telegram)
     configure_sub.add_parser("websocket").set_defaults(func=configure_websocket)
     p = configure_sub.add_parser("adapters")
-    p.add_argument("--target", default=str(WORKSPACE))
+    p.add_argument("--target")
     p.set_defaults(func=configure_adapters)
 
     menu = sub.add_parser("menu")
@@ -881,6 +1257,8 @@ def main(argv: list[str] | None = None) -> None:
     mirror_sub.add_parser("status").set_defaults(func=backup_entry, backup_cmd="mirror")
     backup_sub.add_parser("open-folder").set_defaults(func=backup_entry)
     sub.add_parser("open-console").set_defaults(func=open_console)
+    sub.add_parser("open-project").set_defaults(func=open_project)
+    sub.add_parser("open-runtime").set_defaults(func=open_runtime)
     sub.add_parser("open-telegram-setup").set_defaults(func=open_telegram)
     sub.add_parser("update").set_defaults(func=lambda _: run([find_uv() or "uv", "tool", "upgrade", "useful-agent"], check=False))
     sub.add_parser("uninstall").set_defaults(func=lambda _: print("Run docs/uninstall.md checklist; workspace/backups are never auto-deleted."))

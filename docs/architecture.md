@@ -8,7 +8,7 @@ flowchart TD
   User["User"] --> TG["Telegram bot"]
   User --> MB["Menu bar app"]
   User --> Apps["Codex / Cursor / Claude"]
-  Apps --> Files["Markdown workspace"]
+  Apps --> Files["Project root markdown files"]
   TG --> Nanobot["Nanobot gateway"]
   MB --> CLI["useful-agent CLI"]
   CLI --> Nanobot
@@ -27,3 +27,13 @@ flowchart TD
 - Every agent reads the same router and scoped instructions.
 - Backups live outside the working folder.
 - UX must work through Telegram/menu bar without requiring terminal fluency.
+
+## Folder Model
+
+- Project root: the user's real files.
+- Runtime install root: a Useful Agent folder inside the project.
+- Scratch workspace: runtime control files, not a copy of the project.
+- Backup vault: encrypted artifacts outside the project.
+
+For Denis's Money setup, the intended runtime install root is
+`Money/Harness/useful-agent-runtime`.

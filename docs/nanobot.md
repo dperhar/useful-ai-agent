@@ -17,6 +17,10 @@ Nanobot provides the always-on chat interface.
 - Image generation uses Nanobot's `generate_image` tool with provider
   `codex_cli`, which invokes Codex CLI `$imagegen` and sends generated PNGs
   through Telegram media.
+- Persistence requests write both local memory and routed source-of-truth
+  markdown. If the user says save/remember/record/запиши/зафиксируй, Nanobot
+  must choose the best routed `.md` destination and append there. MemPalace-only
+  saves are not sufficient.
 
 ## Manual BotFather Setup
 

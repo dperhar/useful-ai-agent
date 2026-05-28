@@ -34,4 +34,4 @@ Signed/notarized distribution is on the product roadmap.
 
 Restore actions are safe-by-default: the menu calls `useful-agent backup
 restore`, which creates a timestamped restore folder and opens it. It never
-overwrites the active workspace.
+overwrites the active project.
