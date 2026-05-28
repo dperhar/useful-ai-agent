@@ -9,6 +9,10 @@ Nanobot provides the always-on chat interface.
 - Default reasoning effort: `medium`.
 - One-turn markers: `high`, `xhigh`, `/high`, `/xhigh`, `high -`, `xhigh -`.
 - `/improve` expands to the installed improve workflow.
+- `/goal` is preserved as a Codex-native command and routed to Codex, not
+  reimplemented as a local pseudo-workflow.
+- `/improve` and `/goal` are recognized as exact tokens anywhere in the
+  message; `/improve@bot` and `/goal@bot` are intentionally not shortcuts.
 - Guest Mode uses final-only replies by default for desktop compatibility.
 - Image generation uses Nanobot's `generate_image` tool with provider
   `codex_cli`, which invokes Codex CLI `$imagegen` and sends generated PNGs

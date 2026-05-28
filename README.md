@@ -2,6 +2,10 @@
 
 Plug-and-play local AI-agent harness for macOS.
 
+Status: alpha, self-diagnosing. The installer, doctor, menu bar, backups,
+Telegram, and memory plumbing are implemented, but a clean-machine proof is
+still a release gate before calling this enterprise-ready.
+
 This repo is designed for a non-technical user to give to their coding agent
 in Codex, Cursor, Claude Code, or another local agent:
 
@@ -25,8 +29,8 @@ After install, run useful-agent check and fix anything red.
 - Transcripted meeting/dictation context through read-only MCP.
 - Skills for setup, cleanup, `/improve`, memory reconciliation, Telegram ops,
   backups, and voice/style customization.
-- Encrypted local Git bundle backups with Keychain password and optional iCloud
-  mirror.
+- Encrypted local Git bundle backups with Keychain password, default iCloud
+  mirror when available, and menu/CLI restore into a safe separate folder.
 - Health checks and redacted reports.
 - Native macOS menu-bar controller source for start/check/backup/update/logs.
 
@@ -77,9 +81,15 @@ useful-agent configure websocket
 useful-agent menu install
 useful-agent start
 useful-agent backup
+useful-agent backup list --limit 5
+useful-agent backup restore --latest 1
+useful-agent backup mirror status
 useful-agent logs
 useful-agent update
 ```
+
+Restore is safe-by-default: it creates a separate restore folder and never
+overwrites the active workspace.
 
 ## Official Sources
 

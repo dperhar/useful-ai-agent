@@ -21,11 +21,17 @@ Supported markers anywhere in the user message:
 The marker is stripped before the message is stored in chat history. Effort
 resets to the configured default after one response.
 
-## `/improve`
+## `/improve` and `/goal`
 
 `/improve ...` expands to a normal request that triggers the installed
 `improve` skill. The skill must critique, improve, and propose source
 reconciliation.
+
+`/goal ...` is preserved as Codex-native `/goal ...` and handed to the Codex
+provider. It is not reimplemented in Nanobot.
+
+Both shortcuts are exact token markers and can appear anywhere in the prompt.
+`/improve@bot` and `/goal@bot` intentionally do not trigger these shortcuts.
 
 ## Telegram Guest Mode
 
@@ -51,8 +57,10 @@ present, it falls back to the full replied message.
 
 `patch_nanobot_chat_hardening.py` fixes three Telegram runtime edge cases:
 
-- Routes `/high`, `/xhigh`, `/improve`, `/effort`, and `/think` even when
-  Telegram sends group commands as `/cmd@bot_username`.
+- Routes `/high`, `/xhigh`, `/effort`, and `/think` even when Telegram sends
+  group commands as `/cmd@bot_username`.
+- Routes exact `/improve` and `/goal` only; bot-suffixed forms are intentionally
+  ignored for these two shortcuts.
 - Debounces photo/video albums/media groups for 15 seconds and resets the timer on every
   incoming album item, reducing accidental split requests.
 - On Telegram HTML parse fallback, sends stripped plain text instead of raw

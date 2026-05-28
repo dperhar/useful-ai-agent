@@ -36,7 +36,7 @@ def patch() -> None:
 
     text = text.replace(
         r'r"^/(?:new|stop|restart|status|dream|history|goal|pairing|model)(?:@\w+)?(?:\s+.*)?$"',
-        r'r"^/(?:new|stop|restart|status|dream|history|goal|pairing|model|high|xhigh|improve|effort|think)(?:@\w+)?(?:\s+.*)?$"',
+        r'r"^(?:(?:/(?:new|stop|restart|status|dream|history|pairing|model|high|xhigh|effort|think)(?:@\w+)?)|(?:/(?:goal|improve)))(?:\s+.*)?$"',
         1,
     )
 

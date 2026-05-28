@@ -9,6 +9,8 @@ Implementation:
 - AES-256-CBC encryption with PBKDF2.
 - Password in macOS Keychain.
 - Backup artifacts outside workspace.
-- Optional iCloud mirror in future versions.
+- Configurable encrypted mirror; iCloud Drive is the default suggestion when
+  available.
+- Safe restore into a separate timestamped folder.
 
 Agents may trigger backups but must not delete historical backup artifacts.

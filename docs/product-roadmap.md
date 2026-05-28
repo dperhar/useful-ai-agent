@@ -10,6 +10,8 @@
 - Encrypted backups.
 - Health checks.
 - Menu-bar source.
+- Configurable backup mirror with iCloud default.
+- Safe restore from latest backups or selected file.
 
 ## v1.1
 
@@ -17,10 +19,11 @@
 - Direct Transcripted MCP binary resolver.
 - Better local console UI.
 - Guided Telegram allowed-user setup.
+- Clean-machine proof and full doctor/menu/Telegram matrix.
 
 ## v2
 
 - One-click DMG.
 - Auto-updater with rollback UI.
-- Optional NAS/iCloud backup providers.
+- Optional NAS backup provider.
 - Browser AI context bridge.
